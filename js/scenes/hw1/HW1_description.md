@@ -84,17 +84,6 @@ drifts slowly off-frequency, so you have to keep correcting.
 
 ---
 
-## Also included
-
-`js/scenes/playground/`
-
-- **`tentacle`** — a personal experiment. An IK-driven creature that reads how
-  fast your hand approaches as trust or fear: move slowly and it reaches for
-  you, move sharply and it recoils and reddens. It will also chase a controller
-  beam like a cat after a laser pointer.
-- **`myFirst`** and **`myWorld`** — the in-class warm-ups on animated object
-  hierarchies.
-
 ## Non-scene commits
 
 Two small commits are separated out so they are easy to skip:
