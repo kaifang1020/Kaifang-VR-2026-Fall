@@ -2,6 +2,8 @@ export default () => {
    return {
       enableSceneReloading: true,
       scenes: [ 
+            // HW1
+            { name: "coach"     , path: "./hw1/coach.js"            , public: true },
 
             // Personal experiments
             { name: "tentacle"  , path: "./playground/tentacle.js"  , public: true },
