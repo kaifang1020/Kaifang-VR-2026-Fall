@@ -5,6 +5,7 @@ export default () => {
             // HW1
             { name: "coach"     , path: "./hw1/coach.js"            , public: true },
             { name: "marionette", path: "./hw1/marionette.js"       , public: true },
+            { name: "signalRoom", path: "./hw1/signalRoom.js"       , public: true },
 
             // Personal experiments
             { name: "tentacle"  , path: "./playground/tentacle.js"  , public: true },
