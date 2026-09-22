@@ -596,7 +596,7 @@ async function onSessionStarted(session) {
     initGL();
     initHands();
     //initAudioVolume();
-    initWebcam();
+    //initWebcam();   // 关掉电脑端摄像头，避免浏览器弹窗（课程作业用不到）
     await scenesSetup();
     // scene.inputRenderer.useProfileControllerMeshes(session);
 
