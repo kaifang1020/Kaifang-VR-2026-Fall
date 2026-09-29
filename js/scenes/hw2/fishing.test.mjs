@@ -9,6 +9,12 @@ const rulesURL = url(await readFile(new URL('./fishingRules.js', import.meta.url
 const { FishingGame, FISH, pickFish, SNAP_AFTER, LANDED_FOR } = await import(rulesURL);
 const syncURL = url(await readFile(new URL('./pondSync.js', import.meta.url), 'utf8'));
 const pond = await import(syncURL);
+const musicSource = await readFile(new URL('./fishingMusic.js', import.meta.url), 'utf8');
+const { mixFor, tempoFor } = await import(url(musicSource));
+// In the scene tests the synthesizer is replaced by a recorder: Node has no WebAudio.
+const musicURL = url(`export const createFishingMusic = () => ({
+   on(){}, dispose(){ globalThis.musicLog.push('dispose'); },
+   update(g){ globalThis.musicState = g; }, cue(name,big){ globalThis.musicLog.push(name + (big ? '!' : '')); } });`);
 
 const DT = 1/60;
 const byName = name => FISH.find(f => f.name === name);
@@ -202,6 +208,8 @@ async function scene({xr = false, id = 0, clients = [id]} = {}) {
                         broadcastGlobalElement: (name,key) => globalThis.sent.push(structuredClone(globalThis[name][key]))};
    globalThis.clay = {defineTextMesh: (name,text) => texts[name] = text};
    globalThis.clientData = {};
+   globalThis.musicLog = []; globalThis.musicState = null;
+   globalThis.addEventListener = () => {}; globalThis.removeEventListener = () => {};
    globalThis.testBuzz = []; globalThis.testGltf = [];
    globalThis.inputEvents = {pos: () => xr ? [.2,1,-.3] : null};
    globalThis.clientState = {head: () => xr ? new Array(16).fill(0) : null};
@@ -212,7 +220,7 @@ async function scene({xr = false, id = 0, clients = [id]} = {}) {
    kit.pose = {o:[.2,1,-.3], d:cg.normalize([0,.5,-1])};
    const source = (await readFile(new URL('./fishing.js', import.meta.url), 'utf8'))
       .replace('../../render/core/cg.js',cgURL).replace('./gameKit.js',kitURL).replace('./fishingRules.js',rulesURL)
-      .replace('../../global.js',globalURL).replace('../../render/nodes/gltf2.js',gltfURL).replace('./pondSync.js',syncURL);
+      .replace('../../global.js',globalURL).replace('../../render/nodes/gltf2.js',gltfURL).replace('./pondSync.js',syncURL).replace('./fishingMusic.js',musicURL);
    const module = await import(url(source + '\n// ' + Math.random()));
    await module.init(model);
    const step = () => { model.time += 1/60; model.frame(); };
@@ -532,4 +540,59 @@ test('multiplayer: a match that was never counted down on this device is not joi
    assert.ok(s.game.remaining < 111 && s.game.remaining > 109);
    assert.equal(globalThis.fishingPond.match.id,78,'joined, not restarted');
    s.module.deinit();
+});
+
+// ---------- Music ----------
+
+test('music steps back while a fish tests the bait, goes quiet on the bite and turns tense in a fight', () => {
+   const calm = mixFor({phase:'playing', state:'waiting'});
+   const nibble = mixFor({phase:'playing', state:'nibbling'});
+   const bite = mixFor({phase:'playing', state:'bite'});
+   const loose = mixFor({phase:'playing', state:'fight', tension:.1});
+   const tight = mixFor({phase:'playing', state:'fight', tension:.95});
+   const surge = mixFor({phase:'playing', state:'fight', tension:.5, surging:true});
+   assert.ok(nibble.pluck < calm.pluck/4 && nibble.bass < calm.bass/4, 'quiet enough to count the taps');
+   assert.equal(bite.pluck + bite.bass + bite.shaker + bite.fight, 0);
+   assert.equal(calm.fight, 0);
+   assert.ok(tight.fight > loose.fight && tight.shaker > loose.shaker);
+   assert.equal(surge.fight, 1);
+   assert.ok(mixFor({phase:'playing', state:'waiting', remaining:10}).shaker > calm.shaker, 'hurry in the last seconds');
+   assert.equal(mixFor({phase:'lost'}).pluck, 0);
+   assert.ok(mixFor({phase:'ready'}).pluck > 0);
+   for (const m of [calm,nibble,bite,loose,tight,surge]) for (const v of Object.values(m)) assert.ok(v >= 0 && v <= 1);
+   assert.deepEqual([tempoFor({phase:'playing',state:'waiting'}), tempoFor({phase:'playing',state:'fight'}),
+                     tempoFor({phase:'playing',state:'waiting',remaining:5})],[76,92,88]);
+});
+
+test('fishing scene: the music follows the game and plays the catch, flop, win and lose phrases', async () => {
+   const s = await scene();
+   s.kit.key(' '); s.advance(.05);
+   assert.equal(globalThis.musicState.phase,'playing');
+   const states = new Set();
+   let idle = 0, bite = 0;
+   for (let i = 0; i < 125*60 && s.game.phase === 'playing'; i++) {
+      if (s.game.state === 'idle' && ++idle > 90) { s.kit.key(' '); idle = 0; }
+      if (s.game.state === 'bite') { if (++bite === 20) s.kit.key(' '); } else bite = 0;
+      if (s.game.state === 'fight' && !s.game.surging && s.game.tension < .7) s.kit.keys.add('w'); else s.kit.keys.delete('w');
+      s.step();
+      states.add(globalThis.musicState.state);
+   }
+   for (const state of ['waiting','nibbling','bite','fight']) assert.ok(states.has(state), 'music never heard ' + state);
+   assert.ok(globalThis.musicLog.some(c => c.startsWith('catch')));
+   assert.equal(globalThis.musicLog.at(-1), s.game.phase === 'won' ? 'win' : 'lose');
+   s.module.deinit();
+   assert.equal(globalThis.musicLog.at(-1),'dispose');
+
+   // Reeling without ever letting go snaps the line: the flop phrase.
+   const t = await scene();
+   t.kit.key(' '); t.advance(.05);
+   idle = 0; bite = 0;
+   for (let i = 0; i < 120*60 && !globalThis.musicLog.includes('flop'); i++) {
+      if (t.game.state === 'idle' && ++idle > 60) { t.kit.key(' '); idle = 0; }
+      if (t.game.state === 'bite') { if (++bite === 15) t.kit.key(' '); } else bite = 0;
+      if (t.game.state === 'fight') t.kit.keys.add('w'); else t.kit.keys.delete('w');
+      t.step();
+   }
+   assert.ok(globalThis.musicLog.includes('flop'), 'a snapped line (or a boot) plays the flop');
+   t.module.deinit();
 });

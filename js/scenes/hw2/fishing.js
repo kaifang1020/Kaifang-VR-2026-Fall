@@ -22,12 +22,17 @@
    (rod, bobber, state, score) is broadcast, 15 times a second. Rules for who is
    at the pond and when the match runs are in pondSync.js.
 
+   Music (fishingMusic.js) is synthesized live and follows your own game: calm
+   while you wait, almost silent while a fish tests the bait and bites, tense
+   while you reel in. It starts after the first click, trigger or key press.
+
    Desktop: Space start / cast / strike, hold W to reel, R restart. */
 import * as cg from '../../render/core/cg.js';
 import * as global from '../../global.js';
 import { Gltf2Node } from '../../render/nodes/gltf2.js';
 import { createKit, clamp, buzz } from './gameKit.js';
 import { FishingGame, FISH, LANDED_FOR } from './fishingRules.js';
+import { createFishingMusic } from './fishingMusic.js';
 import { MATCH_SECONDS, COUNTDOWN, LATE_JOIN, SEND_HZ, slotX, matchPhase, presentPlayers,
          standings, winnerOf, anyonePlaying } from './pondSync.js';
 
@@ -48,6 +53,8 @@ export const deinit = () => cleanup();
 export const init = async model => {
    cleanup();
    const kit = createKit(model,'fishing'), game = new FishingGame(MATCH_SECONDS,3,800);
+   const music = createFishingMusic();
+   addEventListener('pointerdown',music.on);                 // browsers only allow sound after a user action
    const add = (shape,color,parent = model) => parent.add(shape).color(color);
    window.fishingGame = game;                                // read-only handle for debugging from the console
    const isVec = p => Array.isArray(p) && p.length >= 3 && p.every(Number.isFinite) && cg.norm(p) > 0;
@@ -256,6 +263,7 @@ export const init = async model => {
    };
 
    const press = hand => {
+      music.on();
       if (game.phase !== 'playing') {                        // any trigger starts; no need to aim at the button
          if (model.time-endTime > 1) { rodHand = hand; startOrJoin(hand); buzz(hand,.8,100); }
          return;
@@ -267,6 +275,7 @@ export const init = async model => {
    const release = hand => held[hand] = false;
    inputEvents.onPress = press; inputEvents.onRelease = release;
    kit.onKey(key => {
+      music.on();
       if (key === ' ' && game.phase !== 'playing') return startOrJoin();
       if (key === 'r') return present.length < 2 ? (game.phase = 'lost', startOrJoin()) : say('R works only when fishing alone');
       if (key !== ' ') return;
@@ -275,6 +284,8 @@ export const init = async model => {
    });
    cleanup = () => {
       kit.dispose();
+      music.dispose();
+      removeEventListener('pointerdown',music.on);
       if (inputEvents.onPress === press) inputEvents.onPress = () => {};
       if (inputEvents.onRelease === release) inputEvents.onRelease = () => {};
    };
@@ -293,11 +304,12 @@ export const init = async model => {
       case 'escaped'   : say('It got away'); kit.tone(220,.25); break;
       case 'hooked'    : say('HOOKED a ' + fish.name + '!',1.2); buzz(rodHand,1,150); kit.tone(740,.15); break;
       case 'surge'     : buzz(rodHand,1,250); kit.tone(260,.25); break;
-      case 'snap'      : say('SNAP! The line broke',2); buzz('left',1,300); buzz('right',1,300); kit.tone(110,.4); break;
+      case 'snap'      : say('SNAP! The line broke',2); buzz('left',1,300); buzz('right',1,300); music.cue('flop'); break;
       case 'junk'      : caught = {...event, kg:game.kg, from:bob.p.slice(), age:0};
-                         buzz(rodHand,.6,200); kit.tone(140,.35); break;
+                         buzz(rodHand,.6,200); music.cue('flop'); break;
       case 'caught'    : caught = {...event, from:bob.p.slice(), age:0};
-                         for (let i = 0; i < 3; i++) setTimeout(() => { buzz(rodHand,.9,70); kit.tone(700+150*i,.12); },110*i);
+                         for (let i = 0; i < 3; i++) setTimeout(() => buzz(rodHand,.9,70),110*i);
+                         music.cue('catch',fish.points >= 400);
                          break;
       case 'lost'      : lostReason = event.reason === 'time' ? 'out of time'
                                     : event.reason === 'beaten' ? (winner ? nameOf(winner.id) : 'someone') + ' reached ' + game.goal + ' first'
@@ -513,11 +525,15 @@ export const init = async model => {
             : ranking.length ? ranking.map((p,i) => (i+1) + ' ' + (p.id === me() ? 'YOU' : nameOf(p.id)) + ' ' + (p.sc|0)).join('    ')
             : present.length + ' PLAYERS AT THE POND');
 
-      // 10. Text and gauges
+      // 10. Music follows my own game
+
+      music.update({phase:game.phase, state:game.state, tension:game.tension, surging:game.surging, remaining:game.remaining});
+
+      // 11. Text and gauges
 
       if (before === 'playing' && game.phase !== 'playing') {
          endTime = t; held.left = held.right = false;
-         kit.tone(game.phase === 'won' ? 1000 : 130,.4);
+         music.cue(game.phase === 'won' ? 'win' : 'lose');
          buzz('left',1,game.phase === 'won' ? 400 : 150); buzz('right',1,game.phase === 'won' ? 400 : 150);
       }
       const live = game.phase === 'playing', fighting = live && game.state === 'fight';

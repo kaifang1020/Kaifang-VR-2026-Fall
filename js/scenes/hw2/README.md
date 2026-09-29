@@ -27,6 +27,14 @@ Catch 800 points of fish in two minutes. You have three lines.
   numbered instructions, a chart of the tap patterns, the weight and points of
   each catch, and YOU WIN / YOU LOST with the reason.
 
+**Music.** A lazy lakeside tune is synthesized live (`fishingMusic.js`, no
+audio files): kalimba-like plucks on a pentatonic scale, soft bass, a shaker,
+water and birds. It follows your own game: it steps back while a fish tests
+the bait so you can count the taps, is almost silent on the bite, and turns
+tense and faster while you reel in. A catch, a boot or a snapped line, a win
+and a loss each have a short phrase. It starts after the first click, trigger
+or key press.
+
 **Several players.** Everyone who opens the fishing scene fishes side by side
 along the dock (each player is shown 0.9 m from the next) and sees the others'
 rods, lines, bobbers, names and live scores, plus a leaderboard above the title.
@@ -97,7 +105,7 @@ Brief Web Audio tones and optional controller vibration provide feedback.
 
 ## Files and checks
 
-- `fishing.js`, `fishingRules.js`, `pondSync.js`, `fishing.test.mjs`: the fishing scene, its rules, its multiplayer rules and their tests.
+- `fishing.js`, `fishingRules.js`, `pondSync.js`, `fishingMusic.js`, `fishing.test.mjs`: the fishing scene, its rules, its multiplayer rules, its music and their tests.
 - `puppetRescue.js` / `tinyPotionLab.js`: scenes, animation, controller input.
 - `gameKit.js`: beam math, cached line-font labels, keyboard controls, sounds.
 - `gameRules.js`: timer, lives, reaction/ordering rules, scoring, and rescue targets.
