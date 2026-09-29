@@ -2,8 +2,15 @@ export default () => {
    return {
       enableSceneReloading: true,
       scenes: [ 
+            // Follow the Coach: the ongoing project, extended every week
+            { name: "coach"       , path: "./coach/coach.js"     , public: true },
+
+            // HW2 games (single player)
+            { name: "fishing"     , path: "./hw2/fishing.js"     , public: true },
+            { name: "puppetRescue", path: "./hw2/puppetRescue.js", public: true },
+            { name: "tinyPotionLab", path: "./hw2/tinyPotionLab.js", public: true },
             // HW1
-            { name: "coach"     , path: "./hw1/coach.js"            , public: true },
+            { name: "coachHW1"  , path: "./hw1/coach.js"            , public: true },   // as submitted for HW1
             { name: "marionette", path: "./hw1/marionette.js"       , public: true },
             { name: "signalRoom", path: "./hw1/signalRoom.js"       , public: true },
 
