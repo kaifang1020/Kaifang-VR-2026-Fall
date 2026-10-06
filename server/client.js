@@ -272,8 +272,8 @@ function Server(wsPort) {
 
    this.syncInterval = value => syncInterval = value;
 
-   this.sync = (name, callback) => {
-      window[name] = server.synchronize(name, syncInterval);
+   this.sync = (name, callback, interval = syncInterval) => {
+      window[name] = server.synchronize(name, interval);
       let m_name = msngr_name(name);
       let isNotEmpty = name => window[name] && Object.keys(window[name]).length >0;
       let addID = (name, id) => '__' + name + '__' + id;
@@ -301,15 +301,18 @@ function Server(wsPort) {
 
    let channelSendQueue = []; // SENDER CHANNELS MUST WAIT FOR A VALID WEB-RTC ID.
    let channelOpenQueue = []; // OPENER CHANNELS MUST WAIT FOR A VALID WEB-RTC ID.
+   let channelSetupForID;
 
    this.synchronize = (name, interval) => {
 
       if (window.clients === undefined)                 // DO NOT DO ANYTHING UNTIL THE
          return window[name];                           // SERVER PROVIDES A CLIENT LIST.
 
-      if (window.clientID === undefined) {              // ON START-UP, ASSIGN A UNIQUE ID
-         window.clientID = clients[clients.length-1];   // TO THIS CLIENT.
+      if (window.clientID === undefined)                 // WAIT FOR THE SERVER TO ASSIGN
+         return window[name];                            // THIS SOCKET'S OWN CLIENT ID.
 
+      if (channelSetupForID !== clientID) {              // INITIALIZE CHANNELS ONCE AFTER
+         channelSetupForID = clientID;                   // THE ID HAS ARRIVED.
          for (let i = 0 ; i < clients.length ; i++)     // ALSO CREATE CHANNEL OBJECTS FOR
             if (clients[i] != clientID) {               // SENDING ONE-TO-ONE PEER CONNECTION
 	       channel[clients[i]] = new Channel();     // INVITES TO OTHER CLIENTS.
@@ -437,4 +440,3 @@ window.shared = func => {
       channel[clientID].on = data => _shared_result = data;
    return _shared_result;
 }
-

@@ -346,6 +346,10 @@ try {
       websockets[ws.index] = ws;
       clients.push(ws.index);
 
+      // Each socket must learn its own ID directly. Inferring it from the last
+      // entry in the shared client list races when two browsers join together.
+      ws.send(JSON.stringify({ global: "clientID", value: ws.index }));
+
       let sendClients = () => {
          let data = JSON.stringify({ global: "clients", value: clients });
          for (var index = 0 ; index < websockets.length ; index++)
