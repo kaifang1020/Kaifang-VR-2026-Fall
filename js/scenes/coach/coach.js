@@ -57,9 +57,13 @@
 import * as cg from "../../render/core/cg.js";
 import { ControllerBeam } from "../../render/core/controllerInput.js";
 import { coachAvatarPose } from "./coachAvatarPose.js";
+import { askAIJson } from "../../util/aiquery.js";
+import { coachReplyPrompt, coachTextPrompt, validateCoachReply } from "./coachAI.js";
+import { mountCoachPromptUI } from "./coachPromptUI.js";
+import { createCoachPromptBoard } from "./coachPromptBoard.js";
 import { createCoachClock } from "./coachClock.js";
 import { createMusic } from "./music.js";
-import { RoundScore, roundPhase, gradeOf, ROUND_POSES, COUNTDOWN_POSES } from "./scoreRules.js";
+import { RoundScore, roundPhase, gradeOf, ROUND_POSES, COUNTDOWN_POSES, activePlayers, teamResult } from "./scoreRules.js";
 import { DOWN, DANCE, FIT, BEAT, poseIndex, poseAt as routinePoseAt } from "./coachRoutine.js";
 
 // ---------- Pose library. Per hand: [outward, height relative to the head, forward] (life size, metres) ----------
@@ -82,6 +86,7 @@ let cleanup = () => {};
 export const deinit = () => cleanup();
 export const init = async model => {
    cleanup();
+   let active = true;
 
    const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
    const ease  = t => t * t * (3 - 2 * t);
@@ -142,16 +147,43 @@ export const init = async model => {
    const START = [0, 1.63, BASE[2]];
    const startButton = model.add('cube').color(.1,.38,.3);
    const setStart = textLine('start', [START[0], START[1]-.012, START[2]+.03], 1.3, [.9,1,.95]);
+   const promptBoard = createCoachPromptBoard(model);
    let watchingPartner = false;
 
    const updateText = () => {
       const recorder = recID();
+      const ai = mode().ai;
+      promptBoard.update(ai);
       if (recorder != -1) {
          const mine = recording && recorder == clientID;
          setStatus(mine ? 'RECORDING ' + snaps.length + '/4' : 'OTHER PLAYER RECORDING');
          setHelp1(mine ? 'Pose on the beat - wait for the buzz' : 'Watch the coach follow their hands');
          setHelp2(mine ? 'Release to finish (at least 2 poses)' : 'Your new routine will play next');
          setHelp3(mine ? '4 poses finish automatically' : 'Recording up to 4 poses');
+      }
+      else if (ai?.state == 'thinking' && round.phase == 'free') {
+         setStatus(ai.source == 'prompt' ? 'AI IS MAKING YOUR ROUTINE' : 'AI IS WRITING A RESPONSE');
+         setHelp1(ai.source == 'prompt' ? 'Your prompt is being turned into moves' : 'Your recorded phrase is playing now');
+         setHelp2(ai.source == 'prompt' ? 'The current routine plays while you wait' : 'The coach will add four response poses');
+         setHelp3('DANCE or FITNESS cancels the request');
+      }
+      else if (ai?.state == 'ready' && round.phase == 'free') {
+         const total = poses().length;
+         const index = Math.max(0, kNow - ai.startK) % total;
+         const humanPart = ai.source != 'prompt' && index < ai.humanCount;
+         setStatus(ai.source == 'prompt' ? 'AI ROUTINE ' + (index + 1) + '/' + total
+                  : humanPart ? 'YOUR MOVES ' + (index + 1) + '/' + ai.humanCount
+                              : 'AI RESPONSE ' + (index - ai.humanCount + 1) + '/4');
+         setHelp1(ai.title);
+         setHelp2(ai.source == 'prompt' ? 'Generated from your text prompt'
+                                        : 'Your phrase and the AI answer loop together');
+         setHelp3('Point at START for a scored round');
+      }
+      else if (ai?.state == 'error' && round.phase == 'free') {
+         setStatus('AI UNAVAILABLE - YOUR MOVES PLAY');
+         setHelp1('Your recorded phrase is saved');
+         setHelp2('Record again to retry the AI response');
+         setHelp3('DANCE or FITNESS restores default moves');
       }
       else if (round.phase == 'countdown') {
          setStatus('GET READY');
@@ -183,7 +215,7 @@ export const init = async model => {
                    ? 'CUSTOM ROUTINE - Match both targets' : 'Match both hand targets');
          setHelp1('Point at START to play a scored round');
          setHelp2('Point at coach + hold trigger to record moves');
-         setHelp3('Select DANCE or FITNESS to reset');
+         setHelp3('AI prompt: use the browser panel; DANCE or FITNESS resets');
       }
 
       // Score line, grade pop-up and the START / PLAY AGAIN button
@@ -203,7 +235,8 @@ export const init = async model => {
                                               + tally.score + '/' + tally.goal + theirs)
              : '');
       setPopup(Date.now() / 1000 < popup.until ? popup.text : '');
-      const showStart = recorder == -1 && (round.phase == 'free' || round.phase == 'done');
+      const showStart = recorder == -1 && ai?.state != 'thinking' &&
+                        (round.phase == 'free' || round.phase == 'done');
       startButton.identity().move(START).scale(showStart ? .24 : 0, showStart ? .06 : 0, .02);
       setStart(! showStart ? '' : round.phase == 'done' ? 'PLAY AGAIN' : 'START');
    };
@@ -317,11 +350,15 @@ export const init = async model => {
    let recID   = () => { let m = mode(); return m.rec !== undefined && m.rec != -1 && alive(m.rec) ? m.rec : -1; }
    let poses   = () => { let m = mode(); return Array.isArray(m.custom) && m.custom.length ? m.custom
                                               : m.mode == 'fit' ? FIT : DANCE; }
-   let poseAt  = k => routinePoseAt(poses(), k);
+   let poseAt  = k => {
+      const m = mode(), ai = m.ai;
+      return routinePoseAt(poses(), ai?.state == 'ready' ? Math.max(0, k - ai.startK) : k);
+   };
 
    let shown   = { a: DOWN.slice(), b: DOWN.slice(), squat: 0, feet: 0, sway: 0 };   // how the coach looks right now
    let chest   = cg.add(BASE, [0,.6,0]), headPos = cg.add(BASE, [0,.75,0]);
    let lastK = -1, lastBeat = -1, judged = -1, myHit = false, nearT = 0;
+   const results = {};                                              // every pose report heard: { id: { k: ok } }
    let combo = 0, jump = 0, burst = [9,9], fireworks = 9;
    let standH = 0, recording = null, snaps = [], nextPulse = { left: 0, right: 0 };
 
@@ -331,7 +368,8 @@ export const init = async model => {
    let closeness = 0, popup = { text: '', until: 0 }, kNow = 0;
    const pop = (text, seconds = .9) => popup = { text, until: Date.now() / 1000 + seconds };
    const startRound = () => {
-      if (recID() != -1 || round.phase == 'countdown' || round.phase == 'playing') return false;
+      if (recID() != -1 || mode().ai?.state == 'thinking' ||
+          round.phase == 'countdown' || round.phase == 'playing') return false;
       coach.round = { k0: kNow + 1 + COUNTDOWN_POSES, n: ROUND_POSES };
       send('round');
       music.cue('tick');
@@ -383,10 +421,65 @@ export const init = async model => {
    }
    let finishRecording = () => {
       recording = null;
-      coach.mode = { mode: mode().mode, custom: snaps.length >= 2 ? snaps : mode().custom, rec: -1 };
+      const human = snaps.length >= 2 ? snaps.map(p => ({ a:p.a.slice(), b:p.b.slice(), squat:p.squat })) : null;
+      if (human) {
+         const id = String(clientID) + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+         coach.mode = { mode: mode().mode, custom: human, rec: -1,
+                        ai: { state:'thinking', id } };
+         askAIJson(coachReplyPrompt(human), { timeout: 25000 })
+            .then(answer => {
+               const reply = validateCoachReply(answer);
+               if (!active || coach.mode?.ai?.id !== id) return;
+               coach.mode = { mode: coach.mode.mode, custom: human.concat(reply.poses), rec: -1,
+                              ai: { state:'ready', id, title:reply.title,
+                                    humanCount:human.length, startK:kNow + 1 } };
+               send('mode');
+            })
+            .catch(error => {
+               if (!active || coach.mode?.ai?.id !== id) return;
+               console.warn('Coach AI response failed:', error);
+               coach.mode = { mode: coach.mode.mode, custom: human, rec: -1,
+                              ai: { state:'error', id } };
+               send('mode');
+            });
+      }
+      else coach.mode = { mode: mode().mode, custom: mode().custom, rec: -1 };
       send('mode');
       buzz('left', 1, 200); buzz('right', 1, 200);
    }
+   const generateFromText = async (description, setStatus) => {
+      const prompt = description.trim().slice(0, 240);
+      if (!prompt) { setStatus('Write a movement idea first.'); return; }
+      if (recording || recID() != -1 || round.phase == 'countdown' || round.phase == 'playing') {
+         setStatus('Finish recording or the scored round first.');
+         return;
+      }
+      const previous = mode();
+      const id = String(clientID) + '-prompt-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      coach.mode = { mode: previous.mode, custom: previous.custom, rec: -1,
+                     ai: { state:'thinking', source:'prompt', prompt, id } };
+      coach.round = null;
+      send('mode');
+      send('round');
+      setStatus('Generating a new eight-move routine...');
+      try {
+         const answer = await askAIJson(coachTextPrompt(prompt), { timeout: 25000 });
+         const routine = validateCoachReply(answer, 8);
+         if (!active || coach.mode?.ai?.id !== id) { setStatus('Generation canceled.'); return; }
+         coach.mode = { mode: coach.mode.mode, custom: routine.poses, rec: -1,
+                        ai: { state:'ready', source:'prompt', prompt, id, title:routine.title,
+                              humanCount:0, startK:kNow + 1 } };
+         send('mode');
+         setStatus('Created: ' + routine.title + '. Enter VR to play it.');
+      } catch (error) {
+         if (!active || coach.mode?.ai?.id !== id) return;
+         console.warn('Coach prompt generation failed:', error);
+         coach.mode = previous;
+         send('mode');
+         setStatus('Could not generate. Your previous routine is still available; try again.');
+      }
+   };
+   const promptUI = mountCoachPromptUI(generateFromText);
    const onKey = e => {
       if (e.key != ' ' || e.repeat || e.target?.closest?.('input,textarea,select,[contenteditable="true"]')) return;
       e.preventDefault();
@@ -396,6 +489,8 @@ export const init = async model => {
    addEventListener('keydown', onKey);
    const pressHandler = inputEvents.onPress, releaseHandler = inputEvents.onRelease;
    cleanup = () => {
+      active = false;
+      promptUI.remove();
       removeEventListener('keydown', onKey);
       music.dispose();
       if (inputEvents.onPress === pressHandler) inputEvents.onPress = () => {};
@@ -568,21 +663,27 @@ export const init = async model => {
          }
       }
 
-      // 5. How did everyone do on the previous pose? (wait 0.3 of a beat so scores arrive over the network)
+      // 5. How did everyone do? Each finished pose is judged once every active player's
+      //    result for it has arrived, or JUDGE_WAIT beats after it ended (scoreRules.js).
+      //    Judging after a fixed 0.3 beat missed slow reports, so on a slow network one
+      //    device counted a partner's miss as a hit and the players' combos drifted apart.
 
-      if (u > .3 && judged != k - 1 && rec == -1) {
-         judged = k - 1;
-         let n = 0, good = 0;
-         for (let key in coach) {
-            let p = coach[key];
-            if (key[0] == 'p' && p && p.k == k - 1 && alive(key.slice(1))) {
-               n++;
-               if (p.ok) good++;
-            }
-         }
-         if (n == 0 && ! real && !watchingPartner) {                 // nobody real: judge the ghost's performance
+      for (let key in coach) {                                        // remember every report heard
+         let p = coach[key];
+         if (key[0] == 'p' && p && Number.isFinite(p.k)) (results[key.slice(1)] ||= {})[p.k] = !! p.ok;
+      }
+      if (rec != -1) judged = k - 1;                                  // choreographing: nothing to judge
+      if (judged < k - 4) judged = k - 2;                             // just started, or a long pause: only the last pose is still open
+      while (judged < k - 1) {
+         let pose = judged + 1;
+         let players = activePlayers(results, pose, alive);
+         let result = players.length ? teamResult(results, players, pose, 2 * (k - pose - 1) + u) : { n: 0, good: 0 };
+         if (! result) break;                                         // still waiting for someone's result
+         judged = pose;
+         let { n, good } = result;
+         if (n == 0 && ! real && !watchingPartner) {                  // nobody real: judge the ghost's performance
             n = 1;
-            good = (k - 1) % 5 != 4 ? 1 : 0;
+            good = pose % 5 != 4 ? 1 : 0;
          }
          if (n > 0 && good == n) {
             combo++;
@@ -596,6 +697,8 @@ export const init = async model => {
          else if (n > 0)
             combo = 0;
       }
+      for (let id in results)                                         // forget old poses
+         for (let pose in results[id]) if (pose < k - 10) delete results[id][pose];
 
       // 6. The coach's pose: follow live while choreographing, otherwise slide from the
       //    previous pose to this one across the two beats
@@ -661,7 +764,9 @@ export const init = async model => {
       let lit = myHit ? 2 : 1;
       arms[frame.aIsLeft ? 'a' : 'b'].end.color(cg.scale([1,.35,.35], lit));
       arms[frame.aIsLeft ? 'b' : 'a'].end.color(cg.scale([.35,.5,1], lit));
-      torso.color(rec != -1 ? [1,.75,.1] : cg.mix(SHIRT, [.4,1,1], hype));   // the coach turns yellow while being choreographed
+      const aiReply = M.ai?.state == 'ready' &&
+         Math.max(0, k - M.ai.startK) % poses().length >= M.ai.humanCount;
+      torso.color(rec != -1 ? [1,.75,.1] : aiReply ? [.65,.38,1] : cg.mix(SHIRT, [.4,1,1], hype));
 
       // 8. My target spheres (hidden while choreographing)
 
@@ -692,7 +797,7 @@ export const init = async model => {
                            : on ? [.4,2,2] : [.2,.2,.25]);
       }
       let pulse = u < .25 ? 1 - u / .25 : 0;                         // the podium rim flashes on the beat
-      rim.color(cg.mix([.15,.2,.3], M.mode == 'fit' ? [1.5,.5,.2] : [.4,.6,2], .3 + .7 * pulse));
+      rim.color(cg.mix([.15,.2,.3], aiReply ? [1.4,.35,2] : M.mode == 'fit' ? [1.5,.5,.2] : [.4,.6,2], .3 + .7 * pulse));
 
       for (let m in icon) {
          let active = M.mode == m && ! (Array.isArray(M.custom) && M.custom.length);

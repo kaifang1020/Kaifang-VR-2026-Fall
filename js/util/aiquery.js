@@ -290,7 +290,6 @@ Here is the query: ${prompt}`;
         const queryPromise = new Promise((resolve, reject) => {
             const timeoutId = setTimeout(() => {
                 reject(new Error('Query timed out'));
-                this.pendingQueries.delete(queryId);
             }, options.timeout || this.timeout);
             
             this.pendingQueries.set(queryId, {

@@ -55,3 +55,28 @@ export class RoundScore {
    get won() { return this.score >= this.goal; }
    get rank() { return rankFor(this.score,this.poses); }
 }
+
+// ---------- The team result for one pose ----------
+// Every player reports {k, ok} for each pose. A device must not judge pose k
+// before the other players' reports for it have crossed the network, or it
+// counts a partner's miss as a success and the players' combos drift apart.
+// So a pose is judged once every active player's result for it has arrived,
+// or JUDGE_WAIT beats after it ended, when a missing result counts as a miss.
+
+export const JUDGE_WAIT = 1.8;       // beats after a pose ends; still inside the next pose (2 beats)
+export const ACTIVE_POSES = 3;       // a player who reported within this many poses is still taking part
+
+// results: {id: {k: ok}}, every report heard so far. isAlive(id): still connected.
+export function activePlayers(results, pose, isAlive = () => true) {
+   return Object.keys(results).filter(id => isAlive(id) &&
+      Object.keys(results[id]).some(k => Number(k) <= pose && Number(k) >= pose - ACTIVE_POSES));
+}
+
+// null while still waiting; otherwise {n, good, late}: players judged, players who
+// hit it, and players whose result never arrived (counted as misses).
+export function teamResult(results, players, pose, waitedBeats) {
+   const missing = players.filter(id => results[id]?.[pose] === undefined);
+   if (missing.length && waitedBeats < JUDGE_WAIT) return null;
+   const good = players.filter(id => results[id]?.[pose] === true).length;
+   return {n: players.length, good, late: missing.length};
+}

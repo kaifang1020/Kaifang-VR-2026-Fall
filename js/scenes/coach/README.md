@@ -15,10 +15,16 @@ new work goes here.
 | `music.js` | The WebAudio synthesizer and beat-aligned scheduler |
 | `scoreRules.js` | Scoring for a round: grades, multiplier, goal, rank, round phases |
 | `coachAvatarPose.js` | Full-body partner avatars inferred from head and controllers |
+| `coachAI.js` | Builds the two AI choreography prompts and checks returned poses |
+| `coachPromptUI.js` | Browser input panel for text-directed AI routines |
+| `coachPromptBoard.js` | In-world panel that shows the submitted prompt and generation status in VR |
 | `scoreRules.test.mjs` | Rule tests, plus the whole scene run with a fake renderer and clock |
 
 ```sh
 node --test js/scenes/coach/scoreRules.test.mjs
+node --test js/scenes/coach/coachAI.test.mjs
+node --test js/scenes/coach/coachPromptUI.test.mjs
+node --test js/util/aiquery.test.mjs
 ```
 
 ## Learn how it works, one step at a time
@@ -45,6 +51,35 @@ The complete scene follows this order every frame:
 |---|---|---|
 | 1 | `hw1` | Mirror the coach, dance and fitness modes, beat haptics, synthesized music, choreography recording, shared combo, partner avatars |
 | 2 | `hw2` | Scored rounds: START, countdown, PERFECT / GOOD / MISS, multiplier, shared scores, YOU WIN / YOU LOST with a rank; music and scoring split into modules |
+
+## AI choreography reply
+
+Point at the coach and hold a trigger to record up to four poses, then release
+(at least two poses are required). Your phrase begins playing immediately. The
+recording player makes one request through the course's `aiquery.js` helper and
+the server's `/api/aiquery` route. The AI returns a title and four poses, using
+the same body-relative hand coordinates as the recorded poses. The browser
+validates and bounds the response before adding it to the shared `coach.mode`.
+Both players then see the same loop: your phrase followed by the four-pose AI
+reply. Purple coach/stage lighting marks the reply. START scores the combined
+routine. DANCE or FITNESS resets to the built-in routine. A new recording
+replaces the old one; a late reply from an older request is discarded.
+
+The server needs `OPENAI_API_KEY` in a root `.env` file or its environment. The
+key stays on the server and must not be put into browser code. If the request
+fails, the recorded phrase still plays and the scene shows `AI UNAVAILABLE`.
+The `.env` file is git-ignored. For example, run the course server from the
+repository root after creating a local `.env` with `OPENAI_API_KEY=...`.
+
+The second AI path starts in the ordinary browser view of `coach`. Expand the
+`AI CHOREOGRAPHY` panel, type a movement idea, and click `GENERATE 8 MOVES`.
+The AI generates a complete eight-pose loop; the prompt and the generated
+routine are independent of the recorded-gesture duet. Only the final validated
+routine is shared, so a computer can submit a prompt while a headset is already
+in the same Coach scene. The prompt and its generation status are also shared
+and shown on a 3D board beside the coach, including non-English text. The input
+panel is ordinary HTML and is used outside the immersive view; enter VR after
+generating if typing on the headset itself.
 
 ## Ideas for later weeks
 
