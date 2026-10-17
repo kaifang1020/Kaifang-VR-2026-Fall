@@ -18,12 +18,14 @@ new work goes here.
 | `coachAI.js` | Builds the two AI choreography prompts and checks returned poses |
 | `coachPromptUI.js` | Browser input panel for text-directed AI routines |
 | `coachPromptBoard.js` | In-world panel that shows the submitted prompt and generation status in VR |
+| `coachKeyboard.js` | In-world keyboard for writing the AI prompt inside VR with a controller beam |
 | `scoreRules.test.mjs` | Rule tests, plus the whole scene run with a fake renderer and clock |
 
 ```sh
 node --test js/scenes/coach/scoreRules.test.mjs
 node --test js/scenes/coach/coachAI.test.mjs
 node --test js/scenes/coach/coachPromptUI.test.mjs
+node --test js/scenes/coach/coachKeyboard.test.mjs
 node --test js/util/aiquery.test.mjs
 ```
 
@@ -78,8 +80,10 @@ routine are independent of the recorded-gesture duet. Only the final validated
 routine is shared, so a computer can submit a prompt while a headset is already
 in the same Coach scene. The prompt and its generation status are also shared
 and shown on a 3D board beside the coach, including non-English text. The input
-panel is ordinary HTML and is used outside the immersive view; enter VR after
-generating if typing on the headset itself.
+panel is ordinary HTML and disappears in immersive VR, so the scene also has an
+in-world keyboard: point at `TYPE A PROMPT` beside the coach and pull the
+trigger. Point at keys to type, or pick one of four ready-made ideas, then
+point at `GO`. The keyboard calls the same generation code as the HTML panel.
 
 ## Ideas for later weeks
 

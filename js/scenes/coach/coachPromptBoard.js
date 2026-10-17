@@ -22,6 +22,12 @@ export function createCoachPromptBoard(model) {
    const textureChannel = PROMPT_TEXTURE_UNIT;
    let previous = '';
 
+   // Shown before anyone has typed a prompt, so players in the headset know the
+   // board exists and where the prompt comes from (the panel is 2D, outside VR).
+   const IDLE = 'No prompt yet. Outside VR, open the AI CHOREOGRAPHY panel in the ' +
+                'top-right corner of the page, describe a movement idea, and press ' +
+                'GENERATE 8 MOVES. A computer on the same server can do it while you are in VR.';
+
    const draw = ai => {
       ctx.fillStyle = '#10202d';
       ctx.fillRect(0, 0, 1024, 512);
@@ -33,12 +39,12 @@ export function createCoachPromptBoard(model) {
       ctx.fillText('AI CHOREOGRAPHY', 40, 59);
       ctx.fillStyle = '#cfdeea';
       ctx.font = '28px system-ui, sans-serif';
-      ctx.fillText(ai.state === 'thinking' ? 'GENERATING...' : ai.title || 'YOUR ROUTINE', 40, 103);
+      ctx.fillText(ai.idle ? 'TYPE A PROMPT' : ai.state === 'thinking' ? 'GENERATING...' : ai.title || 'YOUR ROUTINE', 40, 103);
 
       ctx.fillStyle = '#6d91a1';
       ctx.fillRect(40, 124, 944, 2);
-      ctx.fillStyle = '#f1f6fa';
-      ctx.font = '34px system-ui, sans-serif';
+      ctx.fillStyle = ai.idle ? '#a9c0cb' : '#f1f6fa';
+      ctx.font = (ai.idle ? '30px' : '34px') + ' system-ui, sans-serif';
       const chars = Array.from(ai.prompt);
       const lines = [];
       let line = '';
@@ -58,10 +64,10 @@ export function createCoachPromptBoard(model) {
    };
 
    return { update(ai) {
-      const visible = ai?.source === 'prompt' && typeof ai.prompt === 'string' && !!ai.prompt;
-      board.identity().move(.94, 1.43, -1.04).scale(visible ? .52 : 0, visible ? .26 : 0, 1);
-      if (!visible) return;
-      const key = JSON.stringify([ai.prompt, ai.state, ai.title]);
-      if (key !== previous) { previous = key; draw(ai); }
+      const hasPrompt = ai?.source === 'prompt' && typeof ai.prompt === 'string' && !!ai.prompt;
+      const shown = hasPrompt ? ai : { idle: true, prompt: IDLE };
+      board.identity().move(.94, 1.43, -1.04).scale(.52, .26, 1);
+      const key = JSON.stringify([shown.prompt, shown.state, shown.title]);
+      if (key !== previous) { previous = key; draw(shown); }
    } };
 }

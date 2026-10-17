@@ -6,7 +6,7 @@ const source = await readFile(new URL('./coachPromptBoard.js', import.meta.url),
 const { createCoachPromptBoard, PROMPT_TEXTURE_UNIT } = await import(
    'data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 
-test('the 3D board shows a shared prompt, including Chinese text, then hides on reset', () => {
+test('the 3D board shows a shared prompt, including Chinese text, and instructions without one', () => {
    const oldDocument = globalThis.document;
    const drawn = [];
    const ctx = {
@@ -34,7 +34,8 @@ test('the 3D board shows a shared prompt, including Chinese text, then hides on 
       assert.equal(board.lastUnit, PROMPT_TEXTURE_UNIT, 'redraws go to the same unit');
       assert.ok(PROMPT_TEXTURE_UNIT > 10 && PROMPT_TEXTURE_UNIT < 12, 'below the font units 12-15');
       display.update(null);
-      assert.deepEqual(board.scales.at(-1),[0,0,1]);
+      assert.deepEqual(board.scales.at(-1),[.52,.26,1], 'the board stays visible without a prompt');
+      assert.ok(drawn.includes('TYPE A PROMPT'), 'and explains where the prompt comes from');
    } finally {
       globalThis.document = oldDocument;
    }

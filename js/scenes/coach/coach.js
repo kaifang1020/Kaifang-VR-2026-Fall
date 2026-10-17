@@ -61,6 +61,7 @@ import { askAIJson } from "../../util/aiquery.js";
 import { coachReplyPrompt, coachTextPrompt, validateCoachReply } from "./coachAI.js";
 import { mountCoachPromptUI } from "./coachPromptUI.js";
 import { createCoachPromptBoard } from "./coachPromptBoard.js";
+import { createCoachKeyboard } from "./coachKeyboard.js";
 import { createCoachClock } from "./coachClock.js";
 import { createMusic } from "./music.js";
 import { RoundScore, roundPhase, gradeOf, ROUND_POSES, COUNTDOWN_POSES, activePlayers, teamResult } from "./scoreRules.js";
@@ -148,6 +149,7 @@ export const init = async model => {
    const startButton = model.add('cube').color(.1,.38,.3);
    const setStart = textLine('start', [START[0], START[1]-.012, START[2]+.03], 1.3, [.9,1,.95]);
    const promptBoard = createCoachPromptBoard(model);
+   const keyboard = createCoachKeyboard(model, textLine, { centre: [.42, 1.0, -.6] });   // typing the AI prompt inside VR
    let watchingPartner = false;
 
    const updateText = () => {
@@ -215,7 +217,7 @@ export const init = async model => {
                    ? 'CUSTOM ROUTINE - Match both targets' : 'Match both hand targets');
          setHelp1('Point at START to play a scored round');
          setHelp2('Point at coach + hold trigger to record moves');
-         setHelp3('AI prompt: use the browser panel; DANCE or FITNESS resets');
+         setHelp3('AI: point at TYPE A PROMPT beside the coach');
       }
 
       // Score line, grade pop-up and the START / PLAY AGAIN button
@@ -391,8 +393,16 @@ export const init = async model => {
 
    // ---------- Trigger: switch mode / start choreographing ----------
 
+   // The in-VR keyboard may be used while nobody is recording and no round is being played.
+   const canType = () => recID() == -1 && ! recording && (round.phase == 'free' || round.phase == 'done');
    inputEvents.onPress = hand => {
       music.audioOn();
+      const typed = keyboard.press(ray(hand), canType());
+      if (typed) {                                                   // a key, or the TYPE A PROMPT button
+         buzz(hand, .4, 30);
+         if (typed.go) generateFromText(typed.text, keyboard.setStatus);
+         return;
+      }
       for (let m in BTN)
          if (pointsAt(hand, BTN[m], .1)) {
             coach.mode = { mode: m, custom: null, rec: -1 };
@@ -806,6 +816,7 @@ export const init = async model => {
          for (let i = 0 ; i < icon[m].nChildren() ; i++)
             icon[m].child(i).color(active ? (m == 'fit' ? [2,.7,.2] : [.5,.8,2]) : hot ? [1,1,1] : [.35,.35,.4]);
       }
+      keyboard.update([ray('left'), ray('right')].filter(Boolean), canType());
       updateText();
    });
 }
