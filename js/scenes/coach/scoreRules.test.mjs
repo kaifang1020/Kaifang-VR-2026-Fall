@@ -188,6 +188,7 @@ test('coach scene: free practice, countdown, scored round, result text and repla
       s.listeners.keydown(space); s.advance(.1);
       assert.ok(s.sent.includes('round')); assert.equal(s.labels.status,'GET READY');
       assert.match(s.labels.score,/^[1-6]$/); assert.equal(s.labels.start,'');
+      assert.equal(s.labels.kb_toggle,'AFTER THE ROUND', 'the prompt button stays visible and says why it cannot be used');
       s.listeners.keydown(space);                          // a second press must not restart the countdown
       const k0 = globalThis.coach.round.k0;
 
@@ -298,8 +299,9 @@ test('a player in VR types a prompt on the in-world keyboard and gets the same r
       assert.equal(s.labels.kb_toggle,'HIDE KEYBOARD'); assert.equal(s.labels.kb_Q,'Q');
       pressAt(.42-.2325,1.2);                                 // the UNDERWATER idea
       assert.match(s.labels.kb_draft,/^> \.\.\..*THE SURFACE_$/, 'a long prompt shows its end');
-      pressAt(.42+.105,1.0+.1-3*.062);                        // DEL
-      assert.match(s.labels.kb_draft,/SURFAC_$/);
+      pressAt(.42+.105,1.0+.1-3*.062);                        // DEL after an idea removes the whole idea
+      assert.equal(s.labels.kb_draft,'> _');
+      pressAt(.42-.2325,1.2);                                 // pick it again
       globalThis.testAIAnswer = {title:'Tidal Drift', poses:Array.from({length:8},(_,i) =>
          ({a:[.2,.3-i*.1,.1],b:[.25,-.5+i*.1,.1],squat:0,sway:0}))};
       pressAt(.42+.235,1.0+.1-3*.062);                        // GO
@@ -307,9 +309,25 @@ test('a player in VR types a prompt on the in-world keyboard and gets the same r
       s.advance(1/60);
       assert.equal(globalThis.coach.mode.ai.source,'prompt');
       assert.equal(globalThis.coach.mode.ai.state,'ready');
-      assert.equal(globalThis.coach.mode.ai.prompt,'drifting underwater, then reaching for the surfac');
+      assert.equal(globalThis.coach.mode.ai.prompt,'drifting underwater, then reaching for the surface');
       assert.equal(globalThis.coach.mode.custom.length,8);
       assert.match(s.labels.kb_status,/CREATED: TIDAL DRIFT/);
+      for (let i = 0; i < 6; i++) {                           // a few seconds of the new routine
+         s.advance(1);
+         assert.equal(s.labels.kb_toggle,'HIDE KEYBOARD', 'the button stays after a routine is generated (' + i + ' s)');
+         assert.equal(s.labels.kb_Q,'Q', 'the keyboard stays open (' + i + ' s)');
+      }
+      globalThis.testAIAnswer = {title:'Swim Lanes', poses:Array.from({length:8},(_,i) =>
+         ({a:[.3,.2-i*.1,.1],b:[.3,-.4+i*.1,.1],squat:0,sway:0}))};
+      pressAt(.42-.235,1.0+.1-3*.062);                        // CLEAR
+      for (const ch of 'SWIM') { const row = ['QWERTYUIOP','ASDFGHJKL','ZXCVBNM'].findIndex(r => r.includes(ch)), r = ['QWERTYUIOP','ASDFGHJKL','ZXCVBNM'][row];
+         pressAt(.42 + (r.indexOf(ch) - (r.length - 1) / 2) * .062, 1.0 + .1 - row * .062); }
+      assert.match(s.labels.kb_draft,/^> SWIM_$/);
+      pressAt(.42+.235,1.0+.1-3*.062);                        // GO again
+      await new Promise(resolve => setTimeout(resolve, 0));
+      s.advance(1/60);
+      assert.equal(globalThis.coach.mode.ai.prompt,'swim', 'a second prompt replaces the first');
+      assert.equal(globalThis.coach.mode.ai.title,'SWIM LANES');
       s.module.deinit();
    } finally { s.restore(); }
 });

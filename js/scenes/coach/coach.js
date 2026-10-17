@@ -394,7 +394,10 @@ export const init = async model => {
    // ---------- Trigger: switch mode / start choreographing ----------
 
    // The in-VR keyboard may be used while nobody is recording and no round is being played.
-   const canType = () => recID() == -1 && ! recording && (round.phase == 'free' || round.phase == 'done');
+   // typeBlock() says why not, and the TYPE A PROMPT button shows it.
+   const typeBlock = () => recording || recID() != -1 ? 'RECORDING MOVES' :
+                           round.phase == 'countdown' || round.phase == 'playing' ? 'AFTER THE ROUND' : '';
+   const canType = () => ! typeBlock();
    inputEvents.onPress = hand => {
       music.audioOn();
       const typed = keyboard.press(ray(hand), canType());
@@ -816,7 +819,7 @@ export const init = async model => {
          for (let i = 0 ; i < icon[m].nChildren() ; i++)
             icon[m].child(i).color(active ? (m == 'fit' ? [2,.7,.2] : [.5,.8,2]) : hot ? [1,1,1] : [.35,.35,.4]);
       }
-      keyboard.update([ray('left'), ray('right')].filter(Boolean), canType());
+      keyboard.update([ray('left'), ray('right')].filter(Boolean), canType(), typeBlock());
       updateText();
    });
 }

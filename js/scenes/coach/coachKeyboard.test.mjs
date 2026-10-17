@@ -17,6 +17,8 @@ test('keys edit the prompt: letters, space, delete, clear and ideas', () => {
    assert.equal(editText(text, key('DEL')), 'hi');
    assert.equal(editText(text, key('CLEAR')), '');
    assert.equal(editText('', key('idea0')), IDEAS[0].text);
+   assert.equal(editText(IDEAS[2].text, key('S'), true), 's', 'typing after an idea starts a new prompt');
+   assert.equal(editText(IDEAS[2].text, key('DEL'), true), '', 'DEL removes the whole idea');
    assert.equal(editText('x'.repeat(MAX_PROMPT), key('A')).length, MAX_PROMPT);
 });
 
@@ -48,7 +50,7 @@ test('the toggle opens the keyboard; GO hands over the text; it hides while not 
    kb.update([], true);
    assert.equal(labels.kb_Q, 'Q'); assert.equal(labels.kb_draft, '> OK_');
    kb.update([], false);
-   assert.equal(labels.kb_Q, ''); assert.equal(labels.kb_toggle, '');
+   assert.equal(labels.kb_Q, ''); assert.equal(labels.kb_toggle, 'NOT NOW', 'the button stays and says why');
    assert.equal(kb.press(beam(key('A').x, 1 + key('A').y), false), null, 'no typing during a round');
 });
 
@@ -61,4 +63,17 @@ test('TYPE A PROMPT forgives an aim that is a few centimetres off, like START', 
    const kb = createCoachKeyboard({ add: node }, () => () => {}, { centre: [0, 1, -.6], toggleAt: [1, 1, -1] });
    kb.press(ahead(1.07, .95));
    assert.equal(kb.open, true);
+});
+
+test('a press between keys is swallowed, so it cannot start a recording behind the keyboard', () => {
+   const node = () => ({ identity() { return this; }, move() { return this; }, color() { return this; }, scale() { return this; } });
+   const kb = createCoachKeyboard({ add: node }, () => () => {}, { centre: [0, 1, -.6], toggleAt: [1, 1, -1] });
+   const beam = (x, y) => ({ o: [x, y, 0], dir: [0, 0, -1] });
+   kb.press(beam(1, 1));                                             // open
+   const q = key('Q'), gapX = q.x - q.w / 2 - .02;                   // just left of Q, still on the plate
+   assert.equal(keyAt(keyboardLayout(), [0, 1, -.6], beam(gapX, 1 + q.y)), null, 'no key there');
+   assert.deepEqual(kb.press(beam(gapX, 1 + q.y)), { typed: true });
+   assert.equal(kb.text, '');
+   assert.equal(kb.press(beam(2, 2)), null, 'far from the keyboard, the press goes to the scene');
+   assert.deepEqual(kb.press(beam(1, 1), false), { typed: true, blocked: true }, 'the button is never pressed through');
 });

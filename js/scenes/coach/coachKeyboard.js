@@ -32,10 +32,14 @@ export function keyboardLayout() {
    return keys;
 }
 
-// What a key does to the text being written.
-export function editText(text, key) {
+// What a key does to the text being written. After an idea was picked
+// (fromIdea), typing starts a new prompt instead of adding to the idea's sentence,
+// and DEL removes the whole idea.
+export function editText(text, key, fromIdea = false) {
    if (key.idea) return key.idea.slice(0, MAX_PROMPT);
    if (key.id === 'CLEAR') return '';
+   if (fromIdea && (key.id === 'DEL' || key.id === 'SPACE')) return '';
+   if (fromIdea && key.id.length === 1) text = '';
    if (key.id === 'DEL') return text.slice(0, -1);
    if (key.id === 'SPACE') return text.length && !text.endsWith(' ') ? (text + ' ').slice(0, MAX_PROMPT) : text;
    if (key.id.length === 1) return (text + key.id.toLowerCase()).slice(0, MAX_PROMPT);
@@ -70,11 +74,17 @@ export function createCoachKeyboard(model, label, { centre = [0, 1.02, -.58], to
    const at = k => [centre[0] + k.x, centre[1] + k.y, centre[2]];
    const nodes = keys.map(k => ({ key: k, cube: model.add('cube'),
       text: label('kb_' + k.id, [at(k)[0], at(k)[1] - .008, centre[2] + .012], k.label.length > 1 ? .62 : .9, [.95, 1, 1]) }));
+   const xs = keys.map(k => [k.x - k.w / 2, k.x + k.w / 2]).flat(), ys = keys.map(k => [k.y - k.h / 2, k.y + k.h / 2]).flat();
+   // The plate behind the keys. A press that lands on it, between keys, does nothing,
+   // instead of falling through to the coach behind and starting a recording.
+   const plate = { id: 'PLATE', x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 + .03,
+                   w: Math.max(...xs) - Math.min(...xs) + .06, h: Math.max(...ys) - Math.min(...ys) + .12 };
+   const plateCube = model.add('cube');
    const toggleCube = model.add('cube');
    const toggleText = label('kb_toggle', [toggleAt[0], toggleAt[1] - .012, toggleAt[2] + .012], 1.05, [.9, 1, 1]);
    const draftText = label('kb_draft', [centre[0], centre[1] + .3, centre[2]], .9, [1, 1, 1]);
    const statusText = label('kb_status', [centre[0], centre[1] + .36, centre[2]], .72, [.6, .9, 1]);
-   let open = false, text = '', status = '';
+   let open = false, text = '', status = '', fromIdea = false;
 
    const ascii = s => String(s).replace(/[^\x20-\x7e]/g, '').toUpperCase();
    const setStatus = message => { status = ascii(message).slice(0, 44); };
@@ -86,23 +96,26 @@ export function createCoachKeyboard(model, label, { centre = [0, 1.02, -.58], to
       // A trigger press. Returns null if the beam was not on the keyboard or its
       // button; otherwise { go: true, text } when GO was pressed, or { typed: true }.
       press(r, allowed = true) {
-         if (allowed && nearBeam(toggleAt, r, TOGGLE_RADIUS)) {
+         if (nearBeam(toggleAt, r, TOGGLE_RADIUS)) {
+            if (!allowed) return { typed: true, blocked: true };   // the button says why (update)
             open = !open;
             if (open) setStatus('POINT AND PULL THE TRIGGER TO TYPE');
             return { typed: true };
          }
          if (!open || !allowed) return null;
          const key = keyAt(keys, centre, r);
-         if (!key) return null;
+         if (!key) return keyAt([plate], centre, r, 0) ? { typed: true } : null;
          if (key.id === 'GO') {
             if (!text.trim()) { setStatus('TYPE OR PICK AN IDEA FIRST'); return { typed: true }; }
             return { go: true, text };
          }
-         text = editText(text, key);
+         text = editText(text, key, fromIdea);
+         fromIdea = !!key.idea;
          return { typed: true };
       },
-      // Every frame: rays of both hands for highlighting; allowed = may type now.
-      update(rays, allowed = true) {
+      // Every frame: rays of both hands for highlighting; allowed = may type now;
+      // reason = what the button says while typing is not possible.
+      update(rays, allowed = true, reason = '') {
          const hot = new Set(rays.map(r => keyAt(keys, centre, r)?.id).filter(Boolean));
          const show = open && allowed;
          for (const { key, cube, text: setText } of nodes) {
@@ -113,10 +126,12 @@ export function createCoachKeyboard(model, label, { centre = [0, 1.02, -.58], to
                                 : (hot.has(key.id) ? [.6, .9, 1.4] : [.12, .2, .28]));
             setText(show ? key.label : '');
          }
+         plateCube.identity().move(centre[0] + plate.x, centre[1] + plate.y, centre[2] - .02)
+                  .scale(show ? plate.w / 2 : 0, show ? plate.h / 2 : 0, .004).color(.05, .08, .11);
          const toggleHot = rays.some(r => nearBeam(toggleAt, r, TOGGLE_RADIUS));
-         toggleCube.identity().move(toggleAt).scale(allowed ? .17 : 0, allowed ? .045 : 0, .01)
-                   .color(toggleHot ? [.6, .9, 1.4] : open ? [.35, .25, .5] : [.15, .3, .4]);
-         toggleText(allowed ? (open ? 'HIDE KEYBOARD' : 'TYPE A PROMPT') : '');
+         toggleCube.identity().move(toggleAt).scale(.17, .045, .01)
+                   .color(!allowed ? [.12, .12, .14] : toggleHot ? [.6, .9, 1.4] : open ? [.35, .25, .5] : [.15, .3, .4]);
+         toggleText(!allowed ? ascii(reason || 'NOT NOW') : open ? 'HIDE KEYBOARD' : 'TYPE A PROMPT');
          const tail = text.length > 34 ? '...' + text.slice(-31) : text;
          draftText(show ? '> ' + ascii(tail) + '_' : '');
          statusText(show ? status : '');
