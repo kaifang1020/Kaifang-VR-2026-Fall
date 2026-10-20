@@ -2,6 +2,7 @@
 // course's SO101.js (which come from the robot's URDF file), the axis each joint
 // turns about, and small helpers for angles and limits. armLab.js renders it;
 // the tests check the numbers.
+import * as cg from '../../render/core/cg.js';
 
 export const PRINTED = [1, .82, .12], MOTOR = [.1, .1, .1];   // part colours: 3D-printed shell, servo motor
 
@@ -98,6 +99,38 @@ export const GRAB_CM = 3;
 export function distanceLabel(metres) {
    const cm = metres * 100;
    return (cm <= GRAB_CM ? 'GRAB  ' : '') + cm.toFixed(1) + ' CM';
+}
+
+// ---------- Forward kinematics, the same arithmetic the scene graph does ----------
+// A joint's own matrix: move to xyz, then turnZ, turnY, turnX (clay's order for rpy),
+// with the motor's angle added to the component that is its axis.
+export function jointMatrix(joint, angle = 0) {
+   let [x, y, z] = joint.rpy;
+   if (!joint.fixed) { if (joint.axis === 'z') z += angle; else y += angle; }
+   return cg.mMultiply(cg.mTranslate(joint.xyz), cg.mMultiply(cg.mRotateZ(z), cg.mMultiply(cg.mRotateY(y), cg.mRotateX(x))));
+}
+// Every joint's matrix in the robot's base frame (metres, z up), for six motor angles.
+export function forwardKinematics(angles) {
+   const global = { robotBaseFrame: cg.mIdentity() };
+   let i = 0;
+   for (const j of JOINTS) global[j.name] = cg.mMultiply(global[j.parent], jointMatrix(j, j.fixed ? 0 : angles[i++]));
+   return global;
+}
+export const tcpOf = angles => forwardKinematics(angles).gripper_frame.slice(12, 15);
+
+// Which way should a thumbstick turn motor k so the gripper moves the way the stick
+// is pushed? Nudge the angle and see where the gripper goes. `right` is the sign for
+// the stick's x: robot +x is the player's right. `up` is the sign for pushing the
+// stick forward: robot +z (up) if the motor lifts the gripper, otherwise robot +y
+// (away from the player), as in most VR games. A motor that hardly moves the gripper
+// (wrist roll, the gripper itself) falls back to: right or forward = positive.
+export function stickSigns(angles, k, eps = .01) {
+   const a = angles.slice(), b = angles.slice(); b[k] += eps;
+   const d = cg.subtract(tcpOf(b), tcpOf(a)), n = cg.norm(d);
+   if (n < eps * .05) return { right: 1, up: 1 };
+   const right = Math.abs(d[0]) > .3 * n ? Math.sign(d[0]) : 0;
+   const up = Math.abs(d[2]) > .3 * n ? Math.sign(d[2]) : Math.abs(d[1]) > .3 * n ? Math.sign(d[1]) : 0;
+   return right || up ? { right, up } : { right: 1, up: 1 };
 }
 
 // The professor's demo motion from SO101.js: six slowly swinging angles.

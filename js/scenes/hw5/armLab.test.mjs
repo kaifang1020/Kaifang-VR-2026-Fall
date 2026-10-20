@@ -9,7 +9,9 @@ const read = f => readFile(new URL(f, import.meta.url), 'utf8');
 const url = src => 'data:text/javascript;base64,' + Buffer.from(src).toString('base64');
 const cgURL = url(await read('../../render/core/cg.js'));
 const cg = await import(cgURL);
-const { MOTORS, GRAB_CM } = await import(url(await read('./so101Model.js')));
+const modelSource = (await read('./so101Model.js')).replace("'../../render/core/cg.js'", JSON.stringify(cgURL));
+const modelURL = url(modelSource);
+const { MOTORS, GRAB_CM } = await import(modelURL);
 
 // A scene node that composes matrices exactly as clay.js does (post-multiply).
 class Node {
@@ -22,7 +24,7 @@ class Node {
    turnX(t) { this.m = cg.mMultiply(this.m, cg.mRotateX(t)); return this; }
    turnY(t) { this.m = cg.mMultiply(this.m, cg.mRotateY(t)); return this; }
    turnZ(t) { this.m = cg.mMultiply(this.m, cg.mRotateZ(t)); return this; }
-   scale(x, y, z) { this.m = cg.mMultiply(this.m, cg.mScale(x, y ?? x, z ?? x)); return this; }
+   scale(x, y, z) { this.s = [x, y ?? x, z ?? x]; this.m = cg.mMultiply(this.m, cg.mScale(...this.s)); return this; }
    color(...c) { this._color = c.flat(); return this; } dull() { return this; }
    placeLimb(a, b, r) { this.limb = { a: a.slice(), b: b.slice(), r }; return this.identity().move(cg.mix(a, b, .5)).scale(r); }
    getMatrix() { return this.m.slice(); }
@@ -48,7 +50,7 @@ async function scene() {
          'export function ControllerBeam(model, hand) { this.update = () => {}; this.beamMatrix = () => globalThis.testBeam?.[hand] || null; }')),
       '"../hw2/gameKit.js"': JSON.stringify(url('export const buzz = (...a) => globalThis.buzzes.push(a);')),
       '"../../render/core/stl.js"': JSON.stringify(url('export const stl = name => { globalThis.requestedSTL.push(name); };')),
-      '"./so101Model.js"': JSON.stringify(url(await read('./so101Model.js'))),
+      '"./so101Model.js"': JSON.stringify(modelURL),
    };
    for (const [from, to] of Object.entries(stubs)) { assert.ok(source.includes(from.replace(/"/g, "'")), from); source = source.replace(from.replace(/"/g, "'"), to); }
    globalThis.requestedSTL = requested;
@@ -124,23 +126,25 @@ test('M plays the demo motion inside the limits; deinit removes the key listener
 test('annotation 2: a line from the gripper frame to the target, with the real distance in cm', async () => {
    const s = await scene(); s.advance();
    const line = s.node('tubeZ'), ball = s.node('sphere');
-   assert.ok(line.limb && ball, 'the line and the target exist');
+   assert.ok(line.limb && ball, 'the first dash and the target exist');
+   const dashesOn = () => s.model.all().filter(n => n.form === 'tubeZ' && n.limb && n.s[0] > 0).length;
+   assert.ok(dashesOn() > 3, 'the line is drawn as several dashes: ' + dashesOn());
    const tip = line.limb.a, cm = () => Number(s.texts.armLab_distance.match(/([\d.]+) CM$/)[1]);
    // the line starts at the gripper frame: the point between the jaws, a bit beyond the wrist
    const jaw = s.model.all().find(n => n.form === 'SO101/moving_jaw_so101_v1');
    assert.ok(cg.distance(tip, s.pos(jaw)) < .25, `the line starts at the gripper frame, next to the moving jaw: tip ${tip.map(v => v.toFixed(2))}, jaw ${s.pos(jaw).map(v => v.toFixed(2))}, label ${s.pos(s.node('armLab_gripper')).map(v => v.toFixed(2))}`);
-   assert.ok(cg.distance(tip, line.limb.b) > .05, 'and ends at the target, which starts away from it');
-   assert.equal(Math.round(cg.distance(tip, line.limb.b) / 2 * 100 * 10) / 10, cm(), 'scene metres / 2 = real centimetres');
+   const lastDash = s.model.all().filter(n => n.form === 'tubeZ' && n.limb && n.s[0] > 0).at(-1);
+   assert.ok(cg.distance(tip, lastDash.limb.b) > .05, 'and the dashes run out toward the target');
+   const target = s.pos(ball);
+   assert.equal(Math.round(cg.distance(tip, target) / 2 * 100 * 10) / 10, cm(), 'scene metres / 2 = real centimetres');
    // walk the target onto the gripper: the label says GRAB and everything turns green
    const start = cm();
    s.key('a'); s.advance(.5); s.key('a', 'keyup');
    assert.notEqual(cm(), start, 'A moves the target');
-   const g = s.pos(s.node('armLab_gripper'));                  // cheat: teleport the target to the tip for the test
-   line.limb = null; s.advance();
    const tip2 = s.node('tubeZ').limb.a;
    const press = (k, sec) => { s.key(k); s.advance(sec); s.key(k, 'keyup'); };
-   // move with the keys until within GRAB_CM, axis by axis (0.3 m/s)
-   const go = (k1, k2, i) => { const d = tip2[i] - line.limb.b[i]; press(d > 0 ? k2 : k1, Math.min(3, Math.abs(d) / .3)); };
+   // move with the keys until within GRAB_CM, axis by axis (0.3 m/s); the ball's own position is the target
+   const go = (k1, k2, i) => { const d = tip2[i] - s.pos(ball)[i]; press(d > 0 ? k2 : k1, Math.min(3, Math.abs(d) / .3)); };
    go('a', 'd', 0); go('q', 'e', 1); go('w', 's', 2);
    assert.ok(cm() <= GRAB_CM, 'within grab distance: ' + s.texts.armLab_distance);
    assert.match(s.texts.armLab_distance, /^GRAB  /);
@@ -151,7 +155,7 @@ test('annotation 2: a line from the gripper frame to the target, with the real d
    s.module.deinit();
 });
 
-test('controllers: trigger on a joint ring selects it, the right stick turns it, the left stick works the gripper', async () => {
+test('controllers: trigger on a ring selects a joint; either stick moves the gripper the way it is pushed', async () => {
    const s = await scene(); s.advance();
    const elbow = s.pos(s.node('armLab_elbow_flex'));                  // the label is just above the ring; aim at the ring itself
    const ringOf = i => s.model.all().filter(n => n.form === 'sphere')[i + 1];   // sphere 0 is the target, then the six rings
@@ -161,13 +165,22 @@ test('controllers: trigger on a joint ring selects it, the right stick turns it,
    s.advance();
    assert.match(s.label('elbow_flex'), /^> ELBOW FLEX/, 'the elbow is selected');
    assert.equal(globalThis.buzzes.length, 1, 'a short buzz confirms the selection');
-   globalThis.testJoy.right.x = .8; s.advance(.5); globalThis.testJoy.right.x = 0;
-   assert.match(s.label('elbow_flex'), /\+(2[0-9]|3[0-9]) \//, 'half a second of stick turns it about 27 degrees: ' + s.label('elbow_flex'));
+   const tipY = () => s.pos(s.node('armLab_gripper'))[1];
+   const before = tipY();
+   globalThis.testJoy.right.y = -.8; s.advance(.5); globalThis.testJoy.right.y = 0;   // push the right stick up
+   assert.match(s.label('elbow_flex'), /[-+](2[0-9]|3[0-9]) \//, 'half a second of stick turns it about 27 degrees: ' + s.label('elbow_flex'));
+   assert.ok(tipY() > before + .05, 'and the gripper went up, whichever sign the motor needed');
+   globalThis.testJoy.left.y = .8; s.advance(.5); globalThis.testJoy.left.y = 0;      // the left stick down: back down
+   assert.ok(Math.abs(tipY() - before) < .02, 'the left stick works the same joint the same way');
    assert.equal(s.label('gripper'), 'GRIPPER  CLOSED  JAWS OVERLAP', 'the gripper starts at 0: inside the fixed jaw');
    assert.equal(s.node('armLab_gripper')._color.join(), [1, .2, .2].join(), 'and its label is red');
-   globalThis.testJoy.left.y = -1; s.advance(1); globalThis.testJoy.left.y = 0;   // push the left stick up: open
-   assert.match(s.label('gripper'), /^GRIPPER  OPEN \d+\.\d \/ 11\.7 CM$/, s.label('gripper'));
-   assert.equal(globalThis.testJoy.right.x, 0);
+   s.key('6');                                                                        // select the gripper
+   globalThis.testJoy.left.y = -1; s.advance(1); globalThis.testJoy.left.y = 0;      // up opens it
+   assert.match(s.label('gripper'), /^> GRIPPER  OPEN \d+\.\d \/ 11\.7 CM$/, s.label('gripper'));
+   s.key('1');                                                                        // the shoulder pan
+   const tipZ = () => s.pos(s.node('armLab_gripper'))[2], z0 = tipZ();
+   globalThis.testJoy.right.y = -1; s.advance(.5); globalThis.testJoy.right.y = 0;    // stick forward: the pan swings the gripper away from the player (scene -z)
+   assert.ok(tipZ() < z0 - .05, 'stick forward moved the gripper away: ' + (tipZ() - z0).toFixed(3));
    s.module.deinit();
    assert.notEqual(globalThis.inputEvents.onPress, undefined);
 });

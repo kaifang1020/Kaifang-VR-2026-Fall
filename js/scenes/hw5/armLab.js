@@ -7,10 +7,12 @@
  * The robot itself is built exactly as the course's SO101.js builds it; the
  * tables live in so101Model.js.
  *
- * Step 3: controller input, like a teach pendant. Point a beam at a joint's ring
- * and pull the trigger to select it; the right thumbstick turns it. The left
- * thumbstick opens and closes the gripper. Point at the target ball and hold the
- * trigger to drag it along the beam (the beamSphere.js technique).
+ * Step 3: controller input, like a teach pendant. Point either beam at a joint's
+ * ring and pull the trigger to select it; push either thumbstick the way you want
+ * the gripper to go and the selected motor turns that way (the sign comes from
+ * forward kinematics, so "right" is the player's right and "up" is up). For the
+ * gripper itself, up opens. Point at the target ball and hold the trigger to drag
+ * it along the beam (the beamSphere.js technique).
  *
  * Desktop controls: keys 1-6 select a joint, J / K turn it, R resets, M plays
  * the professor's demo motion. W A S D move the target, Q / E raise and lower it.
@@ -19,7 +21,7 @@ import * as cg from '../../render/core/cg.js';
 import { stl } from '../../render/core/stl.js';
 import { ControllerBeam, joyStickState } from '../../render/core/controllerInput.js';
 import { buzz } from '../hw2/gameKit.js';
-import { LINKS, JOINTS, MOTORS, clampAngle, limitFraction, jointLabel, NEAR_LIMIT, demoMotion, distanceLabel, GRAB_CM, jawsOverlap } from './so101Model.js';
+import { LINKS, JOINTS, MOTORS, clampAngle, limitFraction, jointLabel, NEAR_LIMIT, demoMotion, distanceLabel, GRAB_CM, jawsOverlap, stickSigns } from './so101Model.js';
 
 const WHITE = [.92, .96, 1], ORANGE = [1, .6, .15], RED = [1, .2, .2], CYAN = [.4, 1, 1], GREEN = [.3, 1, .4];
 const SCALE = 2;                                   // the robot is shown at twice life size
@@ -48,7 +50,7 @@ export const init = async model => {
 
    // ---------- 4. Annotations: one floating text per motor ----------
    // Text meshes are rebuilt only when their text changes; their position is set every frame.
-   const text = (id, size = .55) => {
+   const text = (id, size = .85) => {               // the line font is thin: large sizes read better in a headset
       const name = 'armLab_' + id;
       let last, n;
       return (str, pos, color) => {
@@ -58,7 +60,7 @@ export const init = async model => {
       };
    };
    const labels = MOTORS.map(j => text(j.name));
-   const title = text('title', .9), help = text('help', .5), help2 = text('help2', .5), help3 = text('help3', .5), help4 = text('help4', .5);
+   const title = text('title', 1.3), help = text('help', .7), help2 = text('help2', .7), help3 = text('help3', .7), help4 = text('help4', .7);
 
    // ---------- Step 2: a target, and the line from the gripper to it ----------
    // gripper_frame is the URDF's "tool centre point": a link with no mesh that marks
@@ -66,8 +68,18 @@ export const init = async model => {
    const GRIPPER = JOINTS.find(j => j.name === 'gripper_frame');
    let targetPos = [.3, 1.2, -.65];                            // scene metres; the player moves it
    const target = model.add('sphere').color(1, .55, .3);
-   const line = model.add('tubeZ').color(ORANGE);
-   const distText = text('distance', .6);
+   // A dashed line: the engine has no dashes, so it is up to 40 short tubes laid end to
+   // end with gaps; unused ones are scaled to nothing.
+   const DASH = .035, dashes = Array.from({ length: 40 }, () => model.add('tubeZ'));
+   const dashedLine = (a, b, radius, color) => {
+      const length = cg.distance(a, b), dir = length > 1e-6 ? cg.scale(cg.subtract(b, a), 1 / length) : [0, 0, 1];
+      dashes.forEach((d, i) => {
+         const from = i * 2 * DASH, to = Math.min(length, from + DASH);
+         if (from >= length) { d.identity().scale(0); return; }
+         d.placeLimb(cg.add(a, cg.scale(dir, from)), cg.add(a, cg.scale(dir, to)), radius).color(color);
+      });
+   };
+   const distText = text('distance', .95);
 
    // ---------- Step 3: controller beams ----------
    // A ring on every motor to point at, like the START button in coach.js.
@@ -148,17 +160,22 @@ export const init = async model => {
 
       for (const b of Object.values(beams)) b.update();
 
-      // Controllers: a held target rides along the beam; the right stick turns the selected
-      // joint; the left stick opens and closes the gripper. Sticks have a small dead zone.
+      // Controllers: a held target rides along the beam. Either thumbstick drives the
+      // selected motor: its x and y are turned into "move the gripper right / up" with the
+      // signs from stickSigns, so the arm goes the way the stick is pushed. Dead zone 0.15.
       for (const hand of ['left', 'right']) {
          const r = ray(hand);
          if (dragging[hand] && r) targetPos = cg.add(r.o, cg.scale(r.dir, dragging[hand].dist));
          hover[hand] = nearest(hand, jointPoints(), .06)?.index ?? null;
       }
       const stick = v => Math.abs(v) > .15 ? v : 0;
-      const turn = stick(joyStickState.right?.x ?? 0), grip = -stick(joyStickState.right ? joyStickState.left?.y ?? 0 : 0);
-      if (turn) { angle[selected] = clampAngle(MOTORS[selected], angle[selected] + turn * 1.2 * dt); demo = false; }
-      if (grip) { angle[GRIP] = clampAngle(MOTORS[GRIP], angle[GRIP] + grip * 1.2 * dt); demo = false; }
+      const sx = stick(joyStickState.left?.x ?? 0) + stick(joyStickState.right?.x ?? 0);
+      const sy = -(stick(joyStickState.left?.y ?? 0) + stick(joyStickState.right?.y ?? 0));   // hardware: up is negative
+      if (sx || sy) {
+         const sign = stickSigns(angle, selected);
+         const input = Math.max(-1, Math.min(1, sx * sign.right + sy * sign.up));
+         if (input) { angle[selected] = clampAngle(MOTORS[selected], angle[selected] + input * 1.2 * dt); demo = false; }
+      }
 
       // Move the target: W/S forward and back, A/D left and right, Q/E down and up.
       const step = .3 * dt;                                                // metres per second
@@ -197,15 +214,15 @@ export const init = async model => {
       const real = cg.distance(tip, targetPos) / SCALE;
       const grab = real * 100 <= GRAB_CM;
       target.identity().move(targetPos).scale(grab ? .03 : .025).color(grab ? GREEN : [1, .55, .3]);
-      line.placeLimb(tip, targetPos, grab ? .006 : .004).color(grab ? GREEN : ORANGE);
+      dashedLine(tip, targetPos, grab ? .007 : .005, grab ? GREEN : ORANGE);
       const mid = cg.mix(tip, targetPos, .5);
-      distText(distanceLabel(real), [mid[0], mid[1] + .03, mid[2] + .06], grab ? GREEN : ORANGE);
+      distText(distanceLabel(real), [mid[0], mid[1] + .04, mid[2] + .06], grab ? GREEN : ORANGE);
 
       title('SO101 ARM LAB', [0, 1.75, -.8], [.85, .95, 1]);
       help(demo ? 'DEMO MOTION   M STOP   R RESET' : `KEYS 1-6 SELECT   J / K TURN ${MOTORS[selected].name.toUpperCase().replace('_', ' ')}   M DEMO   R RESET`,
-           [0, .62, -.6], [.6, .8, 1]);
-      help2('W A S D  MOVE TARGET   Q / E  LOWER / RAISE IT', [0, .56, -.6], [.6, .8, 1]);
-      help3('VR: POINT AT A JOINT RING + TRIGGER TO SELECT   RIGHT STICK TURNS IT', [0, .50, -.6], [.6, .8, 1]);
-      help4('LEFT STICK OPENS / CLOSES THE GRIPPER   TRIGGER ON THE BALL DRAGS IT', [0, .44, -.6], [.6, .8, 1]);
+           [0, .66, -.6], [.6, .8, 1]);
+      help2('W A S D  MOVE TARGET   Q / E  LOWER / RAISE IT', [0, .58, -.6], [.6, .8, 1]);
+      help3('VR: POINT AT A JOINT RING + TRIGGER TO SELECT IT', [0, .50, -.6], [.6, .8, 1]);
+      help4('PUSH EITHER STICK THE WAY THE GRIPPER SHOULD GO   TRIGGER ON THE BALL DRAGS IT', [0, .42, -.6], [.6, .8, 1]);
    });
 };

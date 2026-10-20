@@ -3,9 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const source = await readFile(new URL('./so101Model.js', import.meta.url), 'utf8');
-const { LINKS, JOINTS, MOTORS, toDeg, clampAngle, limitFraction, jointLabel, NEAR_LIMIT, demoMotion, distanceLabel, GRAB_CM, GRIPPER_CLOSED, gripperOpeningCm, jawsOverlap, toRad } =
-   await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+const url = src => 'data:text/javascript;base64,' + Buffer.from(src).toString('base64');
+const cgURL = url(await readFile(new URL('../../render/core/cg.js', import.meta.url), 'utf8'));
+const source = (await readFile(new URL('./so101Model.js', import.meta.url), 'utf8')).replace("'../../render/core/cg.js'", JSON.stringify(cgURL));
+const { LINKS, JOINTS, MOTORS, toDeg, clampAngle, limitFraction, jointLabel, NEAR_LIMIT, demoMotion, distanceLabel, GRAB_CM, GRIPPER_CLOSED, gripperOpeningCm, jawsOverlap, toRad,
+        forwardKinematics, tcpOf, stickSigns } = await import(url(source));
 
 test('the tables match the course SO101.js: six motors in a chain, every joint carries a link', () => {
    assert.equal(MOTORS.length, 6);
@@ -70,4 +72,27 @@ test('the gripper label shows the jaw opening in cm, and flags the overlap below
       assert.ok(Math.abs(gripperOpeningCm(toRad(deg)) - cm) < .3, deg + ' degrees opens ' + gripperOpeningCm(toRad(deg)).toFixed(1) + ' cm');
    assert.equal(jointLabel(g, toRad(60)), 'GRIPPER  OPEN 6.8 / 11.7 CM');
    assert.equal(jointLabel(g, g.hi), 'GRIPPER  OPEN 11.7 / 11.7 CM  AT LIMIT');
+});
+
+test('forward kinematics: the arm is 45 cm long at zero, and a stick pushed "up" lifts the gripper', () => {
+   const zero = [0, 0, 0, 0, 0, 0], tcp = tcpOf(zero);
+   assert.ok(Math.abs(Math.hypot(...tcp) - .452) < .01, 'reach at zero: ' + Math.hypot(...tcp).toFixed(3));
+   assert.ok(tcp[0] > .3 && tcp[2] > .15, 'forward along +x and a little up');
+   const g = forwardKinematics(zero);
+   assert.ok(Math.abs(g.shoulder_pan[14] - .0624) < 1e-6, 'the first joint sits at the table height z = 0.0624');
+   // at zero the arm points to the player's right (+x), so the pan swings the gripper toward or
+   // away from the player (robot y): the stick's forward axis drives it, not its x axis
+   assert.equal(stickSigns(zero, 0).right, 0);
+   const pan = stickSigns(zero, 0), swung = zero.slice(); swung[0] += pan.up * .3;
+   assert.ok(tcpOf(swung)[1] > tcp[1], 'pushing forward swings the gripper away from the player (+y)');
+   // the shoulder lift and the elbow move it up and down
+   for (const k of [1, 2]) {
+      const s = stickSigns(zero, k);
+      assert.notEqual(s.up, 0, MOTORS[k].name + ' moves the gripper vertically');
+      const lifted = zero.slice(); lifted[k] += s.up * .3;
+      assert.ok(tcpOf(lifted)[2] > tcp[2], MOTORS[k].name + ': pushing up really lifts the gripper');
+   }
+   // the wrist roll and the gripper do not move the TCP: they fall back to "positive"
+   assert.deepEqual(stickSigns(zero, 4), { right: 1, up: 1 });
+   assert.deepEqual(stickSigns(zero, 5), { right: 1, up: 1 });
 });
