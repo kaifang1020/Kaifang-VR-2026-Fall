@@ -1,10 +1,19 @@
 import * as cg from '../render/core/cg.js';
 import { stl } from '../render/core/stl.js';
 
-// Render the SO101 robot arm.
+// DIGITAL DOUBLE OF AN SO101 EDUCATIONAL ROBOT ARM
+
+let motion = time => [         // EXAMPLE OF JOINT ANIMATION INPUT FOR THE ROBOT ARM
+  .3 * Math.cos(time * 1.2),
+  .3 * Math.sin(time * 1.3),
+  .3 * Math.cos(time * 1.4),
+  .3 * Math.sin(time * 1.5),
+  .3 * Math.cos(time * 1.6),
+  .2 * Math.sin(time * 1.7)
+];
 
 export const init = async model => {
-   const printed = [1,.82,.12], motor = [.1,.1,.1];     // COLOR PALETTE FOR ROBOT PARTS
+   const printed = [1,.82,.12], motor = [.1,.1,.1];     // COLOR PALETTE FOR THE ROBOT PARTS
 
    // THE MESH OF EACH LINK IS THE NAME OF A FILE IN media/stl/SO101. EACH LINK'S xyz AND rpy ARE RELATIVE TO THAT LINK'S FRAME.
 
@@ -57,11 +66,11 @@ export const init = async model => {
       for (let mesh of meshList)
             stl('SO101/' + mesh.stl);
 
-   let robotBaseFrame = model.add().move(0,1.5,-1).turnX(-Math.PI/2).scale(3);
-   let node = {};
-   node['robotBaseFrame'] = robotBaseFrame;
+   let robotBaseFrame = model.add().move(-.1,1.5,0).turnX(-Math.PI/2);
 
-   for (let j of joints)                                // CREATE THE KINEMATIC JOINT HIERARCHY
+   let node = {};                                        // CREATE THE KINEMATIC JOINT HIERARCHY
+   node['robotBaseFrame'] = robotBaseFrame;
+   for (let j of joints)
       node[j.name] = node[j.parent].add();
 
    model.animate(() => {
@@ -86,10 +95,18 @@ export const init = async model => {
                                                   .color(mesh.color);
       }
 
-      for (let j of joints)                             // ANIMATE THE ROBOT
-         node[j.name].identity().move(j.xyz)
-                                .turnZ(j.rpy[2])
-                                .turnY(j.rpy[1])
-                                .turnX(j.rpy[0]);
+      let m = [0,0,0,0,0,0];
+//    let m = motion(model.time);
+
+      let i = 0;                                        // ANIMATE THE ROBOT
+      for (let j of joints) {  
+         let z = j.rpy[2], y = j.rpy[1], x = j.rpy[0];
+         switch (i) {
+         case 0: case 2: case 3: z += m[i]; break;
+         case 1: case 4: case 5: y += m[i]; break;
+         }
+         node[j.name].identity().move(j.xyz).turnZ(z).turnY(y).turnX(x);
+         i++;
+      }
    });
 }
