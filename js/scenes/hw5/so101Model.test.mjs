@@ -25,6 +25,7 @@ test('angles are clamped to the limits and the limit fraction grows toward eithe
    const elbow = MOTORS[2];                                      // ±1.69 rad = ±97°
    assert.equal(clampAngle(elbow, 3), elbow.hi);
    assert.equal(clampAngle(elbow, -3), elbow.lo);
+   assert.equal(clampAngle(MOTORS[5], -3), GRIPPER_CLOSED, 'the gripper stops where the jaws touch, not at the servo limit');
    assert.equal(limitFraction(elbow, 0), 0);
    assert.ok(Math.abs(limitFraction(elbow, elbow.hi) - 1) < 1e-9);
    assert.ok(Math.abs(limitFraction(elbow, -elbow.hi / 2) - .5) < 1e-9);
@@ -71,6 +72,7 @@ test('the gripper label shows the jaw opening in cm, and flags the overlap below
    for (const [deg, cm] of [[30, 2.5], [60, 6.8], [100, 11.7]])
       assert.ok(Math.abs(gripperOpeningCm(toRad(deg)) - cm) < .3, deg + ' degrees opens ' + gripperOpeningCm(toRad(deg)).toFixed(1) + ' cm');
    assert.equal(jointLabel(g, toRad(60)), 'GRIPPER  OPEN 6.8 / 11.7 CM');
+   assert.equal(jointLabel(g, GRIPPER_CLOSED), 'GRIPPER  CLOSED  0.0 / 11.7 CM', 'at the contact angle it is simply closed');
    assert.equal(jointLabel(g, g.hi), 'GRIPPER  OPEN 11.7 / 11.7 CM  AT LIMIT');
 });
 

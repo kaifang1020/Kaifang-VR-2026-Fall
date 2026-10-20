@@ -50,14 +50,18 @@ parts, drawn at twice life size on a table, and added:
 
 Two problems I ran into:
 
-- The gripper seemed to rotate "too far": at small angles the moving jaw passes
+- The gripper seemed to rotate "too far": at small angles the moving jaw passed
   through the fixed jaw, as if the model had no walls. Measuring the STL meshes
   showed the jaws actually touch at about +12°, while the URDF lets the servo go
   down to −10°. On the real robot that extra range is just squeezing force; in
-  the digital double there is no collision, so the jaws visibly interpenetrate.
-  I now flag that range in red as JAWS OVERLAP and show the opening in cm only
-  above the contact angle. It made me realise that URDF limits describe what
-  the motor may be commanded, not what the parts can physically do.
+  the digital double there is no collision, so nothing stopped the jaw. At first
+  I only flagged the range in red, which did not fix the picture. Now the scene
+  gives the gripper its own physical limit: it clamps at the contact angle, the
+  label says CLOSED there, and the jaws can no longer pass through each other.
+  The servo's −10° stays in the data as the range the motor may be commanded.
+  A general version of this would need collision detection between parts; here
+  one measured angle was enough. It made me realise that URDF limits describe
+  what the motor may be commanded, not what the parts can physically do.
 - The thumbstick felt reversed: pushing right turned the base so the gripper
   swung left. Each motor's positive direction is whatever its frame in the URDF
   says (the base frame is mounted upside down). The fix: nudge the motor in

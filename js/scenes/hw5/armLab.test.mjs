@@ -80,7 +80,7 @@ test('annotation 1: every motor has an angle label beside it, and the labels sit
    const s = await scene(); s.advance();
    assert.equal(s.label('shoulder_pan'), '> SHOULDER PAN  +0 / -110..+110');
    for (const j of MOTORS.slice(1, 5)) assert.match(s.label(j.name), new RegExp('^' + j.name.toUpperCase().replace('_', ' ') + '  \\+0 / [-+]\\d+\\.\\.[-+]\\d+$'));
-   assert.equal(s.label('gripper'), 'GRIPPER  CLOSED  JAWS OVERLAP', 'the gripper has its own label');
+   assert.equal(s.label('gripper'), 'GRIPPER  CLOSED  0.0 / 11.7 CM', 'the gripper starts closed, with its own label');
    assert.equal(s.texts.armLab_title, 'SO101 ARM LAB');
    const where = MOTORS.map(j => s.pos(s.node('armLab_' + j.name)));
    for (let i = 1; i < where.length; i++)
@@ -172,9 +172,11 @@ test('controllers: trigger on a ring selects a joint; either stick moves the gri
    assert.ok(tipY() > before + .05, 'and the gripper went up, whichever sign the motor needed');
    globalThis.testJoy.left.y = .8; s.advance(.5); globalThis.testJoy.left.y = 0;      // the left stick down: back down
    assert.ok(Math.abs(tipY() - before) < .02, 'the left stick works the same joint the same way');
-   assert.equal(s.label('gripper'), 'GRIPPER  CLOSED  JAWS OVERLAP', 'the gripper starts at 0: inside the fixed jaw');
-   assert.equal(s.node('armLab_gripper')._color.join(), [1, .2, .2].join(), 'and its label is red');
+   assert.equal(s.label('gripper'), 'GRIPPER  CLOSED  0.0 / 11.7 CM', 'the gripper starts with the jaws touching');
+   assert.equal(s.node('armLab_gripper')._color.join(), [1, .2, .2].join(), 'closed is a limit: red');
    s.key('6');                                                                        // select the gripper
+   globalThis.testJoy.left.y = 1; s.advance(1); globalThis.testJoy.left.y = 0;       // push down: try to close it further
+   assert.equal(s.label('gripper'), '> GRIPPER  CLOSED  0.0 / 11.7 CM', 'the jaws stop at contact; they never pass through each other');
    globalThis.testJoy.left.y = -1; s.advance(1); globalThis.testJoy.left.y = 0;      // up opens it
    assert.match(s.label('gripper'), /^> GRIPPER  OPEN \d+\.\d \/ 11\.7 CM$/, s.label('gripper'));
    s.key('1');                                                                        // the shoulder pan

@@ -21,7 +21,7 @@ import * as cg from '../../render/core/cg.js';
 import { stl } from '../../render/core/stl.js';
 import { ControllerBeam, joyStickState } from '../../render/core/controllerInput.js';
 import { buzz } from '../hw2/gameKit.js';
-import { LINKS, JOINTS, MOTORS, clampAngle, limitFraction, jointLabel, NEAR_LIMIT, demoMotion, distanceLabel, GRAB_CM, jawsOverlap, stickSigns } from './so101Model.js';
+import { LINKS, JOINTS, MOTORS, clampAngle, limitFraction, jointLabel, NEAR_LIMIT, demoMotion, distanceLabel, GRAB_CM, jawsOverlap, stickSigns, physicalLo } from './so101Model.js';
 
 const WHITE = [.92, .96, 1], ORANGE = [1, .6, .15], RED = [1, .2, .2], CYAN = [.4, 1, 1], GREEN = [.3, 1, .4];
 const SCALE = 2;                                   // the robot is shown at twice life size
@@ -43,7 +43,8 @@ export const init = async model => {
    for (const j of JOINTS) node[j.name] = node[j.parent].add();
 
    // ---------- 3. The six joint angles: the robot's whole input ----------
-   const angle = MOTORS.map(() => 0);
+   const rest = () => MOTORS.map(j => clampAngle(j, 0));          // zero, except the gripper starts closed (jaws touching)
+   const angle = rest();
    const placed = new Set();                                   // which mesh entries are already in the scene
    let selected = 0, demo = false;
    const GRIP = MOTORS.findIndex(j => j.name === 'gripper');
@@ -130,7 +131,7 @@ export const init = async model => {
       if (k >= '1' && k <= '6') { selected = Number(k) - 1; demo = false; }
       else if ('wasdqe'.includes(k)) { /* held: handled every frame */ }
       else if (k === 'm') demo = !demo;
-      else if (k === 'r') { angle.fill(0); demo = false; }
+      else if (k === 'r') { rest().forEach((a, i) => angle[i] = a); demo = false; }
       else return;
       e.preventDefault();
    };
@@ -202,7 +203,7 @@ export const init = async model => {
       // Annotation 1: the angle beside every joint, coloured by how close it is to a limit.
       MOTORS.forEach((j, k) => {
          const p = jointPos(j), f = limitFraction(j, angle[k]);
-         const bad = f >= 1 || (k === GRIP && jawsOverlap(angle[k]));          // at a limit, or the jaws through each other
+         const bad = f >= 1 || angle[k] <= physicalLo(j) + 1e-9;             // at a limit (the gripper's is the contact angle)
          const color = bad ? RED : f >= NEAR_LIMIT ? ORANGE : k === selected ? CYAN : WHITE;
          labels[k]((k === selected ? '> ' : '') + jointLabel(j, angle[k]), [p[0], p[1] + .05 + .018 * k, p[2] + .12], color);
          const hot = hover.left === k || hover.right === k;

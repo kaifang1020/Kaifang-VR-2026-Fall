@@ -59,16 +59,6 @@ export const MOTORS = JOINTS.filter(j => !j.fixed);          // the six you can 
 export const toDeg = rad => rad * 180 / Math.PI;
 export const toRad = deg => deg * Math.PI / 180;
 
-// Keep an angle inside its joint's limits.
-export const clampAngle = (joint, angle) => Math.max(joint.lo, Math.min(joint.hi, angle));
-
-// How close an angle is to a limit: 0 at the middle of the range, 1 at either end.
-export function limitFraction(joint, angle) {
-   const mid = (joint.lo + joint.hi) / 2, half = (joint.hi - joint.lo) / 2;
-   return half > 0 ? Math.min(1, Math.abs(angle - mid) / half) : 0;
-}
-export const NEAR_LIMIT = .85;                                 // from here on, warn
-
 // The gripper is special. Its servo range is -10..+100 degrees, but the two jaws
 // touch at about +12 degrees (measured from the STL meshes): below that the moving
 // jaw passes through the fixed one, which the real robot cannot do. So its label
@@ -78,12 +68,26 @@ const JAW_LENGTH_CM = 8.4;                     // pivot to tip; 2 L sin(a/2) mat
 export const jawsOverlap = angle => angle < GRIPPER_CLOSED;
 export const gripperOpeningCm = angle => jawsOverlap(angle) ? 0 : 2 * JAW_LENGTH_CM * Math.sin((angle - GRIPPER_CLOSED) / 2);
 
+// Keep an angle inside its joint's limits. For the gripper the lower limit is the
+// physical one (the jaws touching, see GRIPPER_CLOSED below), not the servo's -10
+// degrees: the real jaw is stopped by the other jaw, so the digital double is too.
+export const physicalLo = joint => joint.name === 'gripper' ? GRIPPER_CLOSED : joint.lo;
+export const clampAngle = (joint, angle) => Math.max(physicalLo(joint), Math.min(joint.hi, angle));
+
+// How close an angle is to a limit: 0 at the middle of the range, 1 at either end.
+export function limitFraction(joint, angle) {
+   const mid = (joint.lo + joint.hi) / 2, half = (joint.hi - joint.lo) / 2;
+   return half > 0 ? Math.min(1, Math.abs(angle - mid) / half) : 0;
+}
+export const NEAR_LIMIT = .85;                                 // from here on, warn
+
 // The text shown beside a joint: its name, its angle now, its range in degrees,
 // and a warning near a limit. Example: 'ELBOW FLEX  +64 / -97..+97'.
 export function jointLabel(joint, angle) {
    if (joint.name === 'gripper') {
-      if (jawsOverlap(angle)) return 'GRIPPER  CLOSED  JAWS OVERLAP';
+      if (jawsOverlap(angle)) return 'GRIPPER  CLOSED  JAWS OVERLAP';          // only reachable from data, never from the scene
       const open = gripperOpeningCm(angle), max = gripperOpeningCm(joint.hi);
+      if (open < .05) return 'GRIPPER  CLOSED  0.0 / ' + max.toFixed(1) + ' CM';
       return 'GRIPPER  OPEN ' + open.toFixed(1) + ' / ' + max.toFixed(1) + ' CM' + (limitFraction(joint, angle) >= 1 ? '  AT LIMIT' : '');
    }
    const deg = Math.round(toDeg(angle)), signed = d => (d >= 0 ? '+' : '') + d;
