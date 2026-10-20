@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const source = await readFile(new URL('./pocketCityRules.js', import.meta.url), 'utf8');
-const { addExampleBlock, removeExampleBlock, cityPrompt, validateCityResponse } = await import(
+const { CITY, addExampleBlock, removeExampleBlock, cityPrompt, validateCityResponse, pickExampleCell } = await import(
    'data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 
 test('a controller can stack and erase an example, within the demonstration lot', () => {
@@ -32,4 +32,16 @@ test('AI buildings become bounded supported cubes; invalid geometry is omitted',
    assert.equal(result.discarded,8);
    assert.ok(cityPrompt(example).includes(JSON.stringify(example)));
    assert.throws(() => validateCityResponse({buildings:[]}),/exactly four/);
+});
+
+test('a controller ray selects the visible stack before the table behind it', () => {
+   const x = (CITY.example[0] - (CITY.width-1)/2)*CITY.cell;
+   const z = CITY.centreZ + (CITY.example[1] - (CITY.depth-1)/2)*CITY.cell;
+   const blocks = [0,1,2].map(y => ({x:0,y,z:0,kind:'stone'}));
+   const side = pickExampleCell({origin:[x-.31,1.08,z],dir:[1,-.25,0]},blocks);
+   assert.deepEqual(side.cell,[0,0]);
+   const emptyX = (CITY.example[0]+2-(CITY.width-1)/2)*CITY.cell;
+   const emptyZ = CITY.centreZ+(CITY.example[1]+2-(CITY.depth-1)/2)*CITY.cell;
+   assert.deepEqual(pickExampleCell({origin:[emptyX,1.4,emptyZ],dir:[0,-1,0]},blocks).cell,[2,2]);
+   assert.equal(pickExampleCell({origin:[2,1.4,0],dir:[0,-1,0]},blocks),null);
 });

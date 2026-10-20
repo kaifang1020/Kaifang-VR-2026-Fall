@@ -11,6 +11,7 @@ export default () => {
             { name: "tinyPotionLab", path: "./hw2/tinyPotionLab.js", public: true },
             // HW5: the SO101 robot arm with graphical annotations
             { name: "armLab", path: "./hw5/armLab.js", public: true },
+            { name: "pocketCity", path: "./hw5/pocketCity.js", public: true },
             // HW3: a shared instrument built from message-passing operations
             { name: "echoGarden", path: "./hw3/echoGarden.js", public: true },
             // HW1

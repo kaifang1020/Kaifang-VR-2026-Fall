@@ -5,6 +5,49 @@ export const CITY = Object.freeze({ width: 15, depth: 11, cell: .09, top: .78,
    lots: [[5, 1], [10, 1], [5, 7], [10, 7]] });
 export const MATERIALS = Object.freeze(['stone', 'clay', 'glass', 'light']);
 
+// Return the first visible surface hit by a controller ray. Looking at the
+// side of a stack must select that stack, not the table behind it.
+export function rayBoxDistance(ray, centre, halfSize) {
+   if (!ray) return null;
+   let near = -Infinity, far = Infinity;
+   for (let axis = 0; axis < 3; axis++) {
+      const lo = centre[axis] - halfSize[axis], hi = centre[axis] + halfSize[axis];
+      const direction = ray.dir[axis];
+      if (Math.abs(direction) < 1e-8) {
+         if (ray.origin[axis] < lo || ray.origin[axis] > hi) return null;
+         continue;
+      }
+      const a = (lo - ray.origin[axis]) / direction;
+      const b = (hi - ray.origin[axis]) / direction;
+      near = Math.max(near, Math.min(a,b));
+      far = Math.min(far, Math.max(a,b));
+      if (near > far) return null;
+   }
+   return far > 0 ? Math.max(near,0) : null;
+}
+
+export function pickExampleCell(ray, blocks) {
+   if (!ray) return null;
+   const toX = x => (x - (CITY.width - 1) / 2) * CITY.cell;
+   const toZ = z => CITY.centreZ + (z - (CITY.depth - 1) / 2) * CITY.cell;
+   let best = null;
+   const consider = (x,z,t) => {
+      if (t !== null && (best === null || t < best.distance)) best = {cell:[x,z],distance:t};
+   };
+   for (const block of blocks) {
+      const x = CITY.example[0]+block.x, z = CITY.example[1]+block.z;
+      consider(block.x,block.z,rayBoxDistance(ray,
+         [toX(x),CITY.top+(block.y+.5)*CITY.cell,toZ(z)],
+         [CITY.cell*.49,CITY.cell*.49,CITY.cell*.49]));
+   }
+   for (let x = 0; x < 3; x++) for (let z = 0; z < 3; z++) {
+      consider(x,z,rayBoxDistance(ray,
+         [toX(CITY.example[0]+x),CITY.top+.003,toZ(CITY.example[1]+z)],
+         [CITY.cell*.49,.006,CITY.cell*.49]));
+   }
+   return best;
+}
+
 export function addExampleBlock(blocks, x, z, kind) {
    if (!Number.isInteger(x) || !Number.isInteger(z) || x < 0 || x > 2 || z < 0 || z > 2 ||
        !MATERIALS.includes(kind)) return blocks;
