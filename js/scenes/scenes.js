@@ -9,6 +9,8 @@ export default () => {
             { name: "fishing"     , path: "./hw2/fishing.js"     , public: true },
             { name: "puppetRescue", path: "./hw2/puppetRescue.js", public: true },
             { name: "tinyPotionLab", path: "./hw2/tinyPotionLab.js", public: true },
+            // HW5: the SO101 robot arm with graphical annotations
+            { name: "armLab", path: "./hw5/armLab.js", public: true },
             // HW3: a shared instrument built from message-passing operations
             { name: "echoGarden", path: "./hw3/echoGarden.js", public: true },
             // HW1
