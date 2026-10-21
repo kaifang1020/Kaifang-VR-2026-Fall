@@ -137,10 +137,10 @@ export const init = async model => {
    const g2 = new G2();
    model.txtrSrc(8, g2.getCanvas());                                     // texture channel 8 (fonts use 12-15)
    const panel = model.add('square').txtr(8).move(-.8, 1.2, -.62).turnY(.6).scale(.3);
-   const ROW = k => .58 - .27 * k;                                        // canvas y of motor k's row
-   const sliders = MOTORS.map((j, k) => g2.addWidget(panel, 'slider', .45, ROW(k), '#d8e2ec', '', v => {
+   const ROW = k => .6 - .26 * k;                                        // canvas y of motor k's row
+   const sliders = MOTORS.map((j, k) => g2.addWidget(panel, 'slider', .6, ROW(k), '#d8e2ec', '', v => {
       angle[k] = sliderToAngle(j, v); selected = k; demo = false;         // only while dragging: G2 calls this on 'drag'
-   }, 1.6));
+   }, 1.2));
    const css = c => '#' + c.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
    const arc = (cx, cy, r, t0, t1) => g2.drawCurve(24, u => {             // part of a dial's arc, from t0 to t1
       const a = dialAngle(t0 + (t1 - t0) * u); return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
@@ -152,17 +152,17 @@ export const init = async model => {
          const y = ROW(k), d = dial(j, angle[k]), f = limitFraction(j, angle[k]);
          const bad = f >= 1 || angle[k] <= physicalLo(j) + 1e-9;
          const color = css(bad ? RED : f >= NEAR_LIMIT ? ORANGE : k === selected ? CYAN : WHITE);
-         if (k === selected) this.setColor([.2, .3, .4, .5]).fillRect(-1, y - .13, 2, .26);
+         if (k === selected) this.setColor([.2, .3, .4, .5]).fillRect(-1, y - .125, 2, .25);
          // the dial: a grey arc over the whole range, orange in the warning bands, and a needle
-         const cx = -.74, r = .11;
+         const cx = -.76, r = .1;
          this.lineWidth(.025).setColor('#55606c'); arc(cx, y, r, 0, 1);
          this.setColor(css(ORANGE)); if (d.nearLo > 0) arc(cx, y, r, 0, d.nearLo); arc(cx, y, r, d.nearHi, 1);
          const a = dialAngle(d.t);
          this.lineWidth(.02).setColor(color).line([cx, y], [cx + .85 * r * Math.cos(a), y + .85 * r * Math.sin(a)]);
-         this.setColor(color).textHeight(.06).text(j.name.toUpperCase().replace('_', ' '), -.56, y + .055, 'left');
-         this.setColor('#aab4c0').textHeight(.055).text(j.name === 'gripper' ? jointLabel(j, angle[k]).replace('GRIPPER  ', '') : `${toDeg(angle[k]).toFixed(0)} DEG`, -.56, y - .055, 'left');
+         this.setColor(color).textHeight(.055).text(j.name.toUpperCase().replace('_', ' '), -.6, y + .05, 'left');
+         this.setColor('#aab4c0').textHeight(.045).text(j.name === 'gripper' ? jointLabel(j, angle[k]).replace('GRIPPER  ', '') : `${toDeg(angle[k]).toFixed(0)} DEG`, -.6, y - .05, 'left');
       });
-      this.setColor('#8c98a6').textHeight(.05).text('DRAG A SLIDER: BEAM + TRIGGER, OR MOUSE', 0, -.92, 'center');
+      this.setColor('#8c98a6').textHeight(.04).text('DRAG A SLIDER: BEAM + TRIGGER, OR MOUSE', 0, -.9, 'center');
    };
 
    // ---------- 5. Keyboard ----------
