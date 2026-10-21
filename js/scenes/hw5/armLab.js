@@ -14,6 +14,10 @@
  * gripper itself, up opens. Point at the target ball and hold the trigger to drag
  * it along the beam (the beamSphere.js technique).
  *
+ * Step 4: a teach pendant panel beside the robot: a 2D canvas (the course's G2
+ * library) textured onto a square, with a dial and a slider for every motor.
+ * Dragging a slider with the beam, or the mouse, turns that motor.
+ *
  * Desktop controls: keys 1-6 select a joint, J / K turn it, R resets, M plays
  * the professor's demo motion. W A S D move the target, Q / E raise and lower it.
  */
@@ -21,7 +25,8 @@ import * as cg from '../../render/core/cg.js';
 import { stl } from '../../render/core/stl.js';
 import { ControllerBeam, joyStickState } from '../../render/core/controllerInput.js';
 import { buzz } from '../hw2/gameKit.js';
-import { LINKS, JOINTS, MOTORS, clampAngle, limitFraction, jointLabel, NEAR_LIMIT, demoMotion, distanceLabel, GRAB_CM, jawsOverlap, stickSigns, physicalLo } from './so101Model.js';
+import { G2 } from '../../util/g2.js';
+import { LINKS, JOINTS, MOTORS, clampAngle, limitFraction, jointLabel, NEAR_LIMIT, demoMotion, distanceLabel, GRAB_CM, jawsOverlap, stickSigns, physicalLo, toDeg, dial, dialAngle, sliderToAngle, angleToSlider } from './so101Model.js';
 
 const WHITE = [.92, .96, 1], ORANGE = [1, .6, .15], RED = [1, .2, .2], CYAN = [.4, 1, 1], GREEN = [.3, 1, .4];
 const SCALE = 2;                                   // the robot is shown at twice life size
@@ -124,6 +129,42 @@ export const init = async model => {
    const toScene = m => cg.mMultiply(cg.mInverse(model.getGlobalMatrix()), m);
    const jointPos = j => toScene(node[j.name].getGlobalMatrix()).slice(12, 15);
 
+   // ---------- Step 4: the teach pendant: dials and sliders on a 2D canvas ----------
+   // G2 draws with the browser's ordinary 2D canvas API onto a <canvas>; the engine
+   // uploads that canvas as a texture every frame, and a square shows it. G2's widgets
+   // ask where a controller beam (or the mouse) hits the square, in the canvas's own
+   // -1..+1 coordinates, so a slider can be dragged without any ray maths here.
+   const g2 = new G2();
+   model.txtrSrc(8, g2.getCanvas());                                     // texture channel 8 (fonts use 12-15)
+   const panel = model.add('square').txtr(8).move(-.8, 1.2, -.62).turnY(.6).scale(.3);
+   const ROW = k => .58 - .27 * k;                                        // canvas y of motor k's row
+   const sliders = MOTORS.map((j, k) => g2.addWidget(panel, 'slider', .45, ROW(k), '#d8e2ec', '', v => {
+      angle[k] = sliderToAngle(j, v); selected = k; demo = false;         // only while dragging: G2 calls this on 'drag'
+   }, 1.6));
+   const css = c => '#' + c.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+   const arc = (cx, cy, r, t0, t1) => g2.drawCurve(24, u => {             // part of a dial's arc, from t0 to t1
+      const a = dialAngle(t0 + (t1 - t0) * u); return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+   });
+   g2.render = function () {
+      this.setColor([.08, .1, .14, .94]).fillRect(-1, -1, 2, 2);
+      this.setColor('#dfe8f2').textHeight(.09).text('TEACH PENDANT', 0, .86, 'center');
+      MOTORS.forEach((j, k) => {
+         const y = ROW(k), d = dial(j, angle[k]), f = limitFraction(j, angle[k]);
+         const bad = f >= 1 || angle[k] <= physicalLo(j) + 1e-9;
+         const color = css(bad ? RED : f >= NEAR_LIMIT ? ORANGE : k === selected ? CYAN : WHITE);
+         if (k === selected) this.setColor([.2, .3, .4, .5]).fillRect(-1, y - .13, 2, .26);
+         // the dial: a grey arc over the whole range, orange in the warning bands, and a needle
+         const cx = -.74, r = .11;
+         this.lineWidth(.025).setColor('#55606c'); arc(cx, y, r, 0, 1);
+         this.setColor(css(ORANGE)); if (d.nearLo > 0) arc(cx, y, r, 0, d.nearLo); arc(cx, y, r, d.nearHi, 1);
+         const a = dialAngle(d.t);
+         this.lineWidth(.02).setColor(color).line([cx, y], [cx + .85 * r * Math.cos(a), y + .85 * r * Math.sin(a)]);
+         this.setColor(color).textHeight(.06).text(j.name.toUpperCase().replace('_', ' '), -.56, y + .055, 'left');
+         this.setColor('#aab4c0').textHeight(.055).text(j.name === 'gripper' ? jointLabel(j, angle[k]).replace('GRIPPER  ', '') : `${toDeg(angle[k]).toFixed(0)} DEG`, -.56, y - .055, 'left');
+      });
+      this.setColor('#8c98a6').textHeight(.05).text('DRAG A SLIDER: BEAM + TRIGGER, OR MOUSE', 0, -.92, 'center');
+   };
+
    // ---------- 5. Keyboard ----------
    const onKey = e => {
       if (e.target?.closest?.('input,textarea,select,[contenteditable="true"]')) return;
@@ -218,6 +259,11 @@ export const init = async model => {
       dashedLine(tip, targetPos, grab ? .007 : .005, grab ? GREEN : ORANGE);
       const mid = cg.mix(tip, targetPos, .5);
       distText(distanceLabel(real), [mid[0], mid[1] + .04, mid[2] + .06], grab ? GREEN : ORANGE);
+
+      // The pendant: sliders follow the angles unless one is being dragged, then G2 reads
+      // the beams or mouse, redraws the canvas, and moves the dragged slider's motor.
+      if (!g2.isActiveWidget()) sliders.forEach((s, k) => s.setValue(angleToSlider(MOTORS[k], angle[k])));
+      g2.update();
 
       title('SO101 ARM LAB', [0, 1.75, -.8], [.85, .95, 1]);
       help(demo ? 'DEMO MOTION   M STOP   R RESET' : `KEYS 1-6 SELECT   J / K TURN ${MOTORS[selected].name.toUpperCase().replace('_', ' ')}   M DEMO   R RESET`,

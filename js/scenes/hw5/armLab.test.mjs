@@ -26,6 +26,7 @@ class Node {
    turnZ(t) { this.m = cg.mMultiply(this.m, cg.mRotateZ(t)); return this; }
    scale(x, y, z) { this.s = [x, y ?? x, z ?? x]; this.m = cg.mMultiply(this.m, cg.mScale(...this.s)); return this; }
    color(...c) { this._color = c.flat(); return this; } dull() { return this; }
+   txtr(n) { this.texture = n; return this; } txtrSrc(n, src) { (globalThis.textures ||= {})[n] = src; }
    placeLimb(a, b, r) { this.limb = { a: a.slice(), b: b.slice(), r }; return this.identity().move(cg.mix(a, b, .5)).scale(r); }
    getMatrix() { return this.m.slice(); }
    getGlobalMatrix() { let M = this.getMatrix(); for (let n = this._parent; n; n = n._parent) M = cg.mMultiply(n.getMatrix(), M); return M; }
@@ -51,6 +52,17 @@ async function scene() {
       '"../hw2/gameKit.js"': JSON.stringify(url('export const buzz = (...a) => globalThis.buzzes.push(a);')),
       '"../../render/core/stl.js"': JSON.stringify(url('export const stl = name => { globalThis.requestedSTL.push(name); };')),
       '"./so101Model.js"': JSON.stringify(modelURL),
+      // A fake G2: records the widgets and every drawing call, so render() can be exercised.
+      '"../../util/g2.js"': JSON.stringify(url(`export function G2() {
+         const g2 = globalThis.testG2 = this; this.widgets = []; this.calls = []; this.active = false;
+         this.getCanvas = () => ({ fake: 'canvas' });
+         this.addWidget = (obj, type, x, y, color, label, action, size) => { const w = { obj, type, x, y, action, size, value: .5, setValue(v) { this.value = v; } }; this.widgets.push(w); return w; };
+         this.isActiveWidget = () => this.active;
+         this.render = () => {};
+         this.update = () => { this.calls = []; this.render(); };
+         for (const f of ['setColor', 'fillRect', 'textHeight', 'text', 'lineWidth', 'line', 'drawCurve'])
+            this[f] = (...a) => { this.calls.push([f, ...a]); if (f === 'drawCurve') a[1](0), a[1](1); return this; };
+      }`)),
    };
    for (const [from, to] of Object.entries(stubs)) { assert.ok(source.includes(from.replace(/"/g, "'")), from); source = source.replace(from.replace(/"/g, "'"), to); }
    globalThis.requestedSTL = requested;
@@ -64,7 +76,7 @@ async function scene() {
    const pos = n => n.getGlobalMatrix().slice(12, 15);
    // a beam from O aimed at P: the beam points down the matrix's -z axis, so z = O - P
    const aim = (hand, O, P) => { const m = cg.mIdentity(); const z = cg.normalize(cg.subtract(O, P)); m[8] = z[0]; m[9] = z[1]; m[10] = z[2]; m[12] = O[0]; m[13] = O[1]; m[14] = O[2]; (globalThis.testBeam ||= {})[hand] = m; };
-   return { model, module, texts, requested, advance, key, label, node, pos, aim };
+   return { model, module, texts, requested, advance, key, label, node, pos, aim, g2: globalThis.testG2 };
 }
 
 test('the robot is built from the 13 STL parts, each placed on its joint once', async () => {
@@ -204,5 +216,44 @@ test('controllers: trigger on the target ball drags it along the beam, and the d
    s.aim('right', O, start); s.advance();
    assert.ok(cg.distance(ball(), moved) < 1e-9, 'released: the ball stays where it was left');
    assert.equal(cm(), before);
+   s.module.deinit();
+});
+
+test('step 4: the pendant has a slider per motor; dragging one turns that motor and selects it', async () => {
+   const s = await scene(); s.advance();
+   const { MOTORS: M, sliderToAngle, angleToSlider, physicalLo } = await import(modelURL);
+   assert.equal(s.g2.widgets.length, 6);
+   assert.ok(s.g2.widgets.every(w => w.type === 'slider' && w.obj.form === 'square'));
+   assert.equal(s.g2.widgets[0].obj.texture, 8, 'the square shows the canvas texture');
+   assert.deepEqual(globalThis.textures[8], { fake: 'canvas' });
+   // a slider's value follows the angle: the gripper starts closed, so its slider is at 0
+   assert.equal(s.g2.widgets[5].value, 0);
+   // drag the elbow slider to 25 %: the elbow angle is a quarter of the way up its range
+   s.g2.active = true; s.g2.widgets[2].action(.25); s.advance();
+   assert.ok(Math.abs(angleToSlider(M[2], sliderToAngle(M[2], .25)) - .25) < 1e-9);
+   assert.match(s.label('elbow_flex'), /^> ELBOW FLEX  -4[89] /);               // -97 + .25 * 194 = -48.5, and now selected
+   // the gripper slider cannot push past the contact angle
+   s.g2.widgets[5].action(-1); s.advance();
+   assert.equal(s.label('gripper'), '> GRIPPER  CLOSED  0.0 / 11.7 CM');
+   // release: sliders are written from the angles again, so a keyboard turn moves the slider
+   s.g2.active = false; s.key('1'); globalThis.held; s.advance();
+   const before = s.g2.widgets[0].value;
+   s.key('k'); s.advance(.5);
+   assert.ok(s.g2.widgets[0].value > before + .05, 'the shoulder pan slider moved with the K key');
+   assert.ok(Math.abs(s.g2.widgets[0].value - angleToSlider(M[0], sliderToAngle(M[0], s.g2.widgets[0].value))) < 1e-9);
+   s.module.deinit();
+});
+
+test('step 4: render() draws a dial and a name for every motor, orange bands and a red needle at a limit', async () => {
+   const s = await scene(); s.advance();
+   const names = s.g2.calls.filter(c => c[0] === 'text').map(c => c[1]);
+   for (const n of ['SHOULDER PAN', 'SHOULDER LIFT', 'ELBOW FLEX', 'WRIST FLEX', 'WRIST ROLL', 'GRIPPER']) assert.ok(names.includes(n), n);
+   assert.ok(names.some(t => /CLOSED  0.0 \/ 11.7 CM/.test(t)), 'the gripper row shows its opening');
+   const arcs = s.g2.calls.filter(c => c[0] === 'drawCurve').length, needles = s.g2.calls.filter(c => c[0] === 'line').length;
+   assert.equal(needles, 6); assert.ok(arcs >= 6 * 2, 'a full arc and at least one warning band per dial');
+   // the gripper starts at its physical limit: its needle is red
+   const gripperNeedle = s.g2.calls.filter(c => c[0] === 'line')[5];
+   const colorBefore = s.g2.calls.slice(0, s.g2.calls.indexOf(gripperNeedle)).reverse().find(c => c[0] === 'setColor')[1];
+   assert.equal(colorBefore, '#ff3333');
    s.module.deinit();
 });

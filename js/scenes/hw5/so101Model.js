@@ -81,6 +81,20 @@ export function limitFraction(joint, angle) {
 }
 export const NEAR_LIMIT = .85;                                 // from here on, warn
 
+// ---------- A dial and a slider for each motor (the teach pendant panel) ----------
+// Both run over the physical range, 0 at the low limit and 1 at the high limit, so
+// the gripper's slider stops where the jaws touch. The dial is a 270-degree arc that
+// starts at the lower left (t = 0) and sweeps clockwise to the lower right (t = 1).
+export const sliderToAngle = (joint, v) => physicalLo(joint) + Math.max(0, Math.min(1, v)) * (joint.hi - physicalLo(joint));
+export const angleToSlider = (joint, angle) => Math.max(0, Math.min(1, (angle - physicalLo(joint)) / (joint.hi - physicalLo(joint))));
+export const dialAngle = t => 1.25 * Math.PI - 1.5 * Math.PI * t;      // radians on the canvas, counter-clockwise from +x
+export function dial(joint, angle) {
+   const mid = (joint.lo + joint.hi) / 2, half = (joint.hi - joint.lo) / 2;   // the warning band uses the URDF range, like the labels
+   return { t: angleToSlider(joint, angle),
+            nearLo: angleToSlider(joint, mid - NEAR_LIMIT * half),            // below this, NEAR LIMIT
+            nearHi: angleToSlider(joint, mid + NEAR_LIMIT * half) };          // above this, NEAR LIMIT
+}
+
 // The text shown beside a joint: its name, its angle now, its range in degrees,
 // and a warning near a limit. Example: 'ELBOW FLEX  +64 / -97..+97'.
 export function jointLabel(joint, angle) {
