@@ -5,22 +5,22 @@ export default () => {
             // Follow the Coach: the ongoing project, extended every week
             { name: "coach"       , path: "./coach/coach.js"     , public: true },
 
-            // HW2 games (single player)
+            // HW2 games (single player). Commented-out scenes are kept in the repo but hidden from the menu.
             { name: "fishing"     , path: "./hw2/fishing.js"     , public: true },
-            { name: "puppetRescue", path: "./hw2/puppetRescue.js", public: true },
-            { name: "tinyPotionLab", path: "./hw2/tinyPotionLab.js", public: true },
+            // { name: "puppetRescue", path: "./hw2/puppetRescue.js", public: true },
+            // { name: "tinyPotionLab", path: "./hw2/tinyPotionLab.js", public: true },
             // HW5: the SO101 robot arm with graphical annotations
             { name: "armLab", path: "./hw5/armLab.js", public: true },
             { name: "pocketCity", path: "./hw5/pocketCity.js", public: true },
             // HW3: a shared instrument built from message-passing operations
             { name: "echoGarden", path: "./hw3/echoGarden.js", public: true },
             // HW1
-            { name: "coachHW1"  , path: "./hw1/coach.js"            , public: true },   // as submitted for HW1
+            // { name: "coachHW1"  , path: "./hw1/coach.js"            , public: true },   // as submitted for HW1
             { name: "marionette", path: "./hw1/marionette.js"       , public: true },
-            { name: "signalRoom", path: "./hw1/signalRoom.js"       , public: true },
+            // { name: "signalRoom", path: "./hw1/signalRoom.js"       , public: true },
 
             // Personal experiments
-            { name: "tentacle"  , path: "./playground/tentacle.js"  , public: true },
+            // { name: "tentacle"  , path: "./playground/tentacle.js"  , public: true },
             { name: "myFirst"   , path: "./playground/myFirst.js"   , public: true },
             { name: "myWorld"   , path: "./playground/myWorld.js"   , public: true },
 
