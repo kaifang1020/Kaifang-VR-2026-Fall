@@ -33,15 +33,15 @@ import { Gltf2Node } from '../../render/nodes/gltf2.js';
 import { createKit, clamp, buzz } from './gameKit.js';
 import { FishingGame, FISH, LANDED_FOR } from './fishingRules.js';
 import { createFishingMusic } from './fishingMusic.js';
+import { HAPTICS, castPulse, RUMBLE, tensionPulse } from './haptics.js';
+import { WATER, POND, RADIUS, handVelocity, forwardSpeed, isThrow, launchVelocity, throwVelocity,
+         flightStep, hasLanded, inPond } from './castPhysics.js';
 import { MATCH_SECONDS, COUNTDOWN, LATE_JOIN, SEND_HZ, slotX, matchPhase, presentPlayers,
          standings, winnerOf, anyonePlaying } from './pondSync.js';
 
-const WATER = .06, POND = [0,WATER,-2.9], RADIUS = 1.7;      // pond surface, centre and radius
 const HANDLE = .25, SEGMENT = .45, ROD = HANDLE + 3*SEGMENT; // the rod is a handle plus three jointed segments
 const LEASH = .45;                                           // line length while the bobber hangs from the tip
-const THROW_SPEED = 1.3;                                     // forward hand speed (m/s) that counts as a cast
-const CAST_GAIN = 2.2, CAST_MIN = 2.2, CAST_MAX = 5;         // hand speed (m/s) -> bobber launch speed
-const CAST_ANGLE = .6;                                       // launch elevation (radians)
+// Casting constants (THROW_SPEED, CAST_GAIN, ...) live in castPhysics.js.
 const STRIKE_SPEED = 1.8;                                    // upward tip speed (m/s) that counts as a strike
 const SHOW = [0,1.25,-1.0];                                  // where a landed catch is held up
 const HUD_Z = POND[2];
@@ -243,6 +243,14 @@ export const init = async model => {
    };
 
    const say = (text,seconds = 1.8) => { notice = text; noticeTime = seconds; };
+   // Play a named entry of the vibration vocabulary (haptics.js) on the rod hand, or on both.
+   const feel = (name,hand = rodHand) => {
+      const {both, pulses} = HAPTICS[name];
+      for (const p of pulses) {
+         const go = () => { for (const h of both ? ['left','right'] : [hand]) buzz(h,p.s,p.ms); };
+         p.at ? setTimeout(go,p.at*1000) : go();
+      }
+   };
    const reset = () => {
       game.reset(); caught = null; rumble = 0; dip = 0; noticeTime = 0; elapsed = 0;
       bob = {p:cg.add(tip,[0,-LEASH,0]), q:cg.add(tip,[0,-LEASH,0]), v:[0,0,0]};
@@ -250,22 +258,16 @@ export const init = async model => {
    };
    const launch = velocity => {
       if (!game.cast()) return;
-      const speed = cg.norm(velocity);
-      bob.v = cg.scale(velocity, clamp(speed,CAST_MIN,CAST_MAX)/Math.max(speed,.001));
-      bob.v[1] = Math.max(bob.v[1],1);
-      buzz(rodHand,clamp(speed/CAST_MAX,.3,1),90); kit.tone(300,.18);
+      bob.v = launchVelocity(velocity);
+      const kick = castPulse(cg.norm(velocity)); buzz(rodHand,kick.s,kick.ms); kit.tone(300,.18);
    };
-   // Throw: the line flies out horizontally the way the hand moved, rising at CAST_ANGLE.
-   const throwCast = v => {
-      const flat = [v[0],0,v[2]], n = cg.norm(flat), speed = clamp(CAST_GAIN*cg.norm(v),CAST_MIN,CAST_MAX);
-      const dir = n > .01 ? cg.scale(flat,1/n) : [0,0,-1];
-      launch(cg.add(cg.scale(dir,speed*Math.cos(CAST_ANGLE)),[0,speed*Math.sin(CAST_ANGLE),0]));
-   };
+   // Throw: the line flies out horizontally the way the hand moved (castPhysics.js).
+   const throwCast = v => launch(throwVelocity(v));
 
    const press = hand => {
       music.on();
       if (game.phase !== 'playing') {                        // any trigger starts; no need to aim at the button
-         if (model.time-endTime > 1) { rodHand = hand; startOrJoin(hand); buzz(hand,.8,100); }
+         if (model.time-endTime > 1) { rodHand = hand; startOrJoin(hand); feel('start',hand); }
          return;
       }
       held[hand] = true;
@@ -294,21 +296,21 @@ export const init = async model => {
    const react = event => {
       const fish = event.fish;
       switch (event.type) {
-      case 'splash'    : ripple(spot); buzz(rodHand,.7,100); kit.tone(180,.15); break;
+      case 'splash'    : ripple(spot); feel('splash'); kit.tone(180,.15); break;
       case 'missedPond': say('Missed the pond - cast again'); kit.tone(150,.2); break;
-      case 'nibble'    : dip = 1; ripple(spot); buzz(rodHand,.8,80); kit.tone(880,.04); break;
+      case 'nibble'    : dip = 1; ripple(spot); feel('nibble'); kit.tone(880,.04); break;
       case 'rumble'    : rumble = event.seconds; break;
-      case 'bite'      : dip = 3; ripple(spot); buzz(rodHand,event.weak ? .5 : 1,event.weak ? 120 : 220);
+      case 'bite'      : dip = 3; ripple(spot); feel(event.weak ? 'biteWeak' : 'bite');
                          kit.tone(event.weak ? 300 : 660,.2); break;
-      case 'early'     : say('Too early - you scared it away'); buzz(rodHand,.3,60); kit.tone(200,.2); break;
+      case 'early'     : say('Too early - you scared it away'); feel('early'); kit.tone(200,.2); break;
       case 'escaped'   : say('It got away'); kit.tone(220,.25); break;
-      case 'hooked'    : say('HOOKED a ' + fish.name + '!',1.2); buzz(rodHand,1,150); kit.tone(740,.15); break;
-      case 'surge'     : buzz(rodHand,1,250); kit.tone(260,.25); break;
-      case 'snap'      : say('SNAP! The line broke',2); buzz('left',1,300); buzz('right',1,300); music.cue('flop'); break;
+      case 'hooked'    : say('HOOKED a ' + fish.name + '!',1.2); feel('hooked'); kit.tone(740,.15); break;
+      case 'surge'     : feel('surge'); kit.tone(260,.25); break;
+      case 'snap'      : say('SNAP! The line broke',2); feel('snap'); music.cue('flop'); break;
       case 'junk'      : caught = {...event, kg:game.kg, from:bob.p.slice(), age:0};
-                         buzz(rodHand,.6,200); music.cue('flop'); break;
+                         feel('junk'); music.cue('flop'); break;
       case 'caught'    : caught = {...event, from:bob.p.slice(), age:0};
-                         for (let i = 0; i < 3; i++) setTimeout(() => buzz(rodHand,.9,70),110*i);
+                         feel('caught');
                          music.cue('catch',fish.points >= 400);
                          break;
       case 'lost'      : lostReason = event.reason === 'time' ? 'out of time'
@@ -375,14 +377,13 @@ export const init = async model => {
       if (previousTip) tipVel = cg.mix(tipVel,cg.scale(cg.subtract(tip,previousTip),1/dt),.35);
       previousTip = tip.slice();
       hand = pose.o;
-      handVel = previousHand ? cg.mix(handVel,cg.scale(cg.subtract(hand,previousHand),1/dt),.4) : [0,0,0];
+      handVel = handVelocity(handVel,previousHand,hand,dt);
       previousHand = hand.slice();
 
       // Cast: throw the hand forward, toward the pond. No button needed. A short
       // pause after each catch keeps the reeling motion from casting by accident.
       idleFor = game.state === 'idle' ? idleFor+dt : 0;
-      const forward = cg.dot(handVel,cg.normalize(cg.subtract([POND[0],hand[1],POND[2]],hand)));
-      if (xr && playing && game.state === 'idle' && idleFor > .6 && forward > THROW_SPEED) throwCast(handVel);
+      if (xr && playing && game.state === 'idle' && isThrow(forwardSpeed(handVel,hand),idleFor)) throwCast(handVel);
 
       // 2. Strike: the trigger, a quick upward flick of the rod tip, or Space
 
@@ -408,12 +409,10 @@ export const init = async model => {
          if (n > 1.2) bob.q = bob.p.slice();                 // reeled back in from the pond: no slingshot
       }
       else if (game.state === 'flying') {
-         bob.v[1] -= 9.8*dt;
-         bob.p = cg.add(bob.p,cg.scale(bob.v,dt));
-         if (bob.p[1] <= WATER+.02) {
-            const inPond = Math.hypot(bob.p[0]-POND[0],bob.p[2]-POND[2]) < RADIUS-.1;
+         ({p: bob.p, v: bob.v} = flightStep(bob.p,bob.v,dt));
+         if (hasLanded(bob.p)) {
             spot = [bob.p[0],WATER,bob.p[2]];
-            events.push(...game.land(inPond));
+            events.push(...game.land(inPond(bob.p)));
          }
       }
       else {
@@ -433,11 +432,11 @@ export const init = async model => {
 
       // 5. Haptics that last: the boot's rumble, and line tension while fighting
 
-      if ((rumble = Math.max(0,rumble-dt)) > 0 && t > nextRumble) { buzz(rodHand,.35,70); nextRumble = t+.06; }
+      if ((rumble = Math.max(0,rumble-dt)) > 0 && t > nextRumble) { buzz(rodHand,RUMBLE.s,RUMBLE.ms); nextRumble = t+RUMBLE.every; }
       if (game.state === 'fight' && t > nextPulse) {
-         const k = clamp(game.tension,0,1);
-         buzz(rodHand,.35+.65*k,game.surging ? 80 : 50);
-         nextPulse = t + (game.surging ? .09 : .3-.2*k);
+         const p = tensionPulse(game.tension,game.surging);
+         buzz(rodHand,p.s,p.ms);
+         nextPulse = t + p.every;
       }
       if (game.state !== 'nibbling') rumble = 0;
 
@@ -534,7 +533,7 @@ export const init = async model => {
       if (before === 'playing' && game.phase !== 'playing') {
          endTime = t; held.left = held.right = false;
          music.cue(game.phase === 'won' ? 'win' : 'lose');
-         buzz('left',1,game.phase === 'won' ? 400 : 150); buzz('right',1,game.phase === 'won' ? 400 : 150);
+         feel(game.phase === 'won' ? 'win' : 'lose');
       }
       const live = game.phase === 'playing', fighting = live && game.state === 'fight';
       status('SCORE ' + game.score + '/' + game.goal + '   FISH ' + game.caught + '   LINES ' + game.lines +

@@ -14,7 +14,10 @@ export const init = async model => {
     buddha.scale = [1.3,1.3,1.3];
     global.gltfRoot.addNode(buddha);
 
+    const rotation = quat.create();
     model.animate(() => {
+        // Rotate around the vertical axis once every 20 seconds.
+        quat.setAxisAngle(rotation, [0, 1, 0], model.time * Math.PI / 10);
+        buddha.rotation = rotation;
     });
  }
-

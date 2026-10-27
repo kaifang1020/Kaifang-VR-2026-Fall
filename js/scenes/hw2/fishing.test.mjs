@@ -8,6 +8,9 @@ const url = source => 'data:text/javascript;base64,' + Buffer.from(source).toStr
 const rulesURL = url(await readFile(new URL('./fishingRules.js', import.meta.url), 'utf8'));
 const { FishingGame, FISH, pickFish, SNAP_AFTER, LANDED_FOR } = await import(rulesURL);
 const syncURL = url(await readFile(new URL('./pondSync.js', import.meta.url), 'utf8'));
+const hapticsURL = url(await readFile(new URL('./haptics.js', import.meta.url), 'utf8'));
+const castURL = url((await readFile(new URL('./castPhysics.js', import.meta.url), 'utf8'))
+   .replace('../../render/core/cg.js', url(await readFile(new URL('../../render/core/cg.js', import.meta.url), 'utf8'))));
 const pond = await import(syncURL);
 const musicSource = await readFile(new URL('./fishingMusic.js', import.meta.url), 'utf8');
 const { mixFor, tempoFor } = await import(url(musicSource));
@@ -220,7 +223,7 @@ async function scene({xr = false, id = 0, clients = [id]} = {}) {
    kit.pose = {o:[.2,1,-.3], d:cg.normalize([0,.5,-1])};
    const source = (await readFile(new URL('./fishing.js', import.meta.url), 'utf8'))
       .replace('../../render/core/cg.js',cgURL).replace('./gameKit.js',kitURL).replace('./fishingRules.js',rulesURL)
-      .replace('../../global.js',globalURL).replace('../../render/nodes/gltf2.js',gltfURL).replace('./pondSync.js',syncURL).replace('./fishingMusic.js',musicURL);
+      .replace('../../global.js',globalURL).replace('../../render/nodes/gltf2.js',gltfURL).replace('./pondSync.js',syncURL).replace('./fishingMusic.js',musicURL).replace('./castPhysics.js',castURL).replace('./haptics.js',hapticsURL);
    const module = await import(url(source + '\n// ' + Math.random()));
    await module.init(model);
    const step = () => { model.time += 1/60; model.frame(); };
@@ -595,4 +598,89 @@ test('fishing scene: the music follows the game and plays the catch, flop, win a
    }
    assert.ok(globalThis.musicLog.includes('flop'), 'a snapped line (or a boot) plays the flop');
    t.module.deinit();
+});
+
+// ---------- Casting math (castPhysics.js) ----------
+
+const cast = await import(castURL);
+const fly = v0 => {                                          // launch from a typical rod tip and fly until landing
+   let p = [.2,1.9,-1.6], v = v0, t = 0;
+   while (!cast.hasLanded(p) && t < 5) { ({p,v} = cast.flightStep(p,v,1/72)); t += 1/72; }
+   return {p, t};
+};
+
+test('cast: hand velocity is smoothed, and a still hand has none', () => {
+   assert.deepEqual(cast.handVelocity([0,0,0],null,[0,1,0],1/60),[0,0,0]);
+   const v = cast.handVelocity([0,0,0],[0,1,0],[0,1,-.05],1/60);   // moved 5 cm in one frame: 3 m/s
+   assert.ok(Math.abs(v[2] - -1.2) < 1e-9, 'only 40% of a single frame counts');
+});
+
+test('cast: only a fast enough movement toward the pond, after settling, is a throw', () => {
+   const hand = [0,1,-.3];
+   assert.ok(cast.forwardSpeed([0,0,-2],hand) > 1.9);
+   assert.ok(cast.forwardSpeed([0,0,2],hand) < 0, 'pulling back is not forward');
+   assert.ok(Math.abs(cast.forwardSpeed([2,0,0],hand)) < .1, 'sideways is not forward');
+   assert.equal(cast.isThrow(2,1),true);
+   assert.equal(cast.isThrow(1,1),false);
+   assert.equal(cast.isThrow(2,.3),false, 'right after a catch');
+});
+
+test('cast: launch speed is kept between CAST_MIN and CAST_MAX and always rises', () => {
+   for (const hand of [[0,0,-.2],[0,0,-1.5],[0,0,-9]]) {
+      const v = cast.throwVelocity(hand), speed = Math.hypot(...v);
+      assert.ok(speed >= cast.CAST_MIN - 1e-9 && speed <= cast.CAST_MAX + 1e-9, String(speed));
+      assert.ok(v[1] >= 1);
+   }
+   assert.ok(cast.launchVelocity([0,-3,-3])[1] >= 1, 'even a downward request rises');
+});
+
+test('cast: a straight throw lands in the pond, a hard sideways one misses, a harder one goes farther', () => {
+   const straight = fly(cast.throwVelocity([0,0,-1.5]));
+   assert.ok(cast.inPond(straight.p), JSON.stringify(straight.p));
+   assert.ok(!cast.inPond(fly(cast.throwVelocity([-2,0,-.3])).p));
+   const soft = fly(cast.throwVelocity([0,0,-1.1])), hard = fly(cast.throwVelocity([0,0,-2.2]));
+   assert.ok(hard.p[2] < soft.p[2] - .5, 'farther');
+   assert.ok(straight.t > .5 && straight.t < 1.5, 'about a second in the air: ' + straight.t.toFixed(2));
+});
+
+// ---------- Vibration vocabulary (haptics.js) ----------
+
+const haptics = await import(hapticsURL);
+
+test('haptics: every entry is a list of valid pulses the motor can play', () => {
+   for (const [name,{pulses}] of Object.entries(haptics.HAPTICS)) {
+      assert.ok(pulses.length > 0, name);
+      for (const p of pulses) {
+         assert.ok(p.s > 0 && p.s <= 1, name + ' strength');
+         assert.ok(p.ms >= 50, name + ': pulses shorter than 50 ms are hard to feel');
+         assert.ok(p.at >= 0, name);
+      }
+   }
+   assert.ok(haptics.HAPTICS.bite.pulses[0].s > haptics.HAPTICS.nibble.pulses[0].s, 'the bite is stronger than a tap');
+   assert.ok(haptics.HAPTICS.biteWeak.pulses[0].s < haptics.HAPTICS.bite.pulses[0].s, 'a boot bites softer');
+   assert.equal(haptics.HAPTICS.caught.pulses.length,3);
+});
+
+test('haptics: tighter line, stronger and faster pulses; a surge rattles fast', () => {
+   const loose = haptics.tensionPulse(.1,false), tight = haptics.tensionPulse(.95,false), over = haptics.tensionPulse(1.1,false);
+   assert.ok(tight.s > loose.s && tight.every < loose.every);
+   assert.deepEqual(over,haptics.tensionPulse(1,false),'no stronger than full');
+   assert.ok(haptics.tensionPulse(.1,true).every < tight.every);
+   assert.ok(haptics.castPulse(10).s === 1 && haptics.castPulse(0).s === .3);
+});
+
+test('fishing scene: vibrations come from the shared table', async () => {
+   const s = await scene();
+   s.kit.key(' '); s.advance(.05);
+   let idle = 0;
+   for (let i = 0; i < 60*60 && s.game.state !== 'fight'; i++) {
+      if (s.game.state === 'idle' && ++idle > 60) { s.kit.key(' '); idle = 0; }
+      if (s.game.state === 'bite' && !s.game.fish.junk) s.kit.key(' ');
+      s.step();
+   }
+   const felt = globalThis.testBuzz.map(([,st,ms]) => st + '/' + ms);
+   assert.ok(felt.includes('0.7/100'),'splash');
+   assert.ok(felt.includes('0.8/80'),'nibble');
+   assert.ok(felt.includes('1/220') || felt.includes('0.5/120'),'bite');
+   s.module.deinit();
 });

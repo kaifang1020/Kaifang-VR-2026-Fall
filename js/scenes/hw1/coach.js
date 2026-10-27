@@ -31,7 +31,8 @@
    / each player's score are separate elements, and each is broadcast on its own,
    so nobody overwrites anyone. The eight beads around the stage are the combo
    counter: they light only while everyone keeps hitting, and filling all eight
-   sets off fireworks.
+   sets off fireworks. Other players also appear as full-body avatars inferred
+   from their already shared headset and controller positions.
 
    Music: one track for dance and one for fitness, synthesized live with
    WebAudio (no audio files), aligned with the beat and the haptics. Browsers
@@ -43,6 +44,7 @@
 
 import * as cg from "../../render/core/cg.js";
 import { ControllerBeam } from "../../render/core/controllerInput.js";
+import { coachAvatarPose } from "./coachAvatarPose.js";
 
 // ---------- Pose library. Per hand: [outward, height relative to the head, forward] (life size, metres) ----------
 
@@ -206,6 +208,55 @@ export const init = async model => {
    icon.fit  .add('tubeX' ).move(-.07,0,0).scale(.018,.04,.04);
    icon.fit  .add('tubeX' ).move( .07,0,0).scale(.018,.04,.04);
 
+   // Center each line using the line font's fixed character spacing. Rebuild
+   // a text mesh only when its content changes, rather than on every frame.
+   const textLine = (id, position, scale, color) => {
+      const name = 'coachText_' + id;
+      let node = null, previous = null;
+      return text => {
+         if (text === previous) return;
+         previous = text;
+         clay.defineTextMesh(name, text);
+         if (!node) node = model.add(name).color(color).dull();
+         const width = text.length ? .019 * (text.length - 1) + .015 : 0;
+         node.identity().move(position[0] - width * scale / 2, position[1], position[2]).scale(scale);
+      };
+   };
+   textLine('title', [0, 1.95, BASE[2]], 1.8, [.85,.95,1])('FOLLOW THE COACH');
+   const setStatus = textLine('status', [0, 1.85, BASE[2]], 1.25, [.5,1,.85]);
+   for (const m of ['dance', 'fit'])
+      textLine(m, cg.add(BTN[m], [0,-.18,.03]), 1.35,
+               m === 'dance' ? [.5,.8,1] : [1,.65,.3])(m === 'dance' ? 'DANCE' : 'FITNESS');
+   const setHelp1 = textLine('help1', [0,.43,BASE[2]+.39], 1.05, [.9,.95,1]);
+   const setHelp2 = textLine('help2', [0,.36,BASE[2]+.39], 1.05, [.9,.95,1]);
+   const setHelp3 = textLine('help3', [0,.29,BASE[2]+.39], .95, [.6,.8,1]);
+   let watchingPartner = false;
+
+   const updateText = () => {
+      const recorder = recID();
+      if (recorder != -1) {
+         const mine = recording && recorder == clientID;
+         setStatus(mine ? 'RECORDING ' + snaps.length + '/4' : 'OTHER PLAYER RECORDING');
+         setHelp1(mine ? 'Pose on the beat - wait for the buzz' : 'Watch the coach follow their hands');
+         setHelp2(mine ? 'Release to finish (at least 2 poses)' : 'Your new routine will play next');
+         setHelp3(mine ? '4 poses finish automatically' : 'Recording up to 4 poses');
+      }
+      else if (watchingPartner) {
+         setStatus('WATCH PARTNER - MIRROR THE COACH');
+         setHelp1('Coach shows the target pose');
+         setHelp2('Partner shows tracked movement');
+         setHelp3('Slight network delay is normal');
+      }
+      else {
+         const custom = mode().custom;
+         setStatus(Array.isArray(custom) && custom.length
+                   ? 'CUSTOM ROUTINE - Match both targets' : 'Match both hand targets');
+         setHelp1('Point at coach + hold trigger');
+         setHelp2('to record your own moves');
+         setHelp3('Select DANCE or FITNESS to reset');
+      }
+   };
+
    // ---------- The coach's body ----------
 
    const SKIN = [.95,.75,.55], SHIRT = [.15,.55,.9], PANTS = [.2,.2,.3];
@@ -220,6 +271,75 @@ export const init = async model => {
    // My own target spheres and ghost hands
    let targets = { left: model.add('sphere').opacity(.45), right: model.add('sphere').opacity(.45) };
    let ghosts  = { left: model.add('sphere'), right: model.add('sphere') }, ghostPos = {};
+
+   // The room already transmits each headset and controller matrix. Build a
+   // lightweight body for every OTHER immersive client from those tracked points.
+   // No extra network messages or full-body tracker are needed.
+   const remoteBodies = new Map();
+   const makeRemoteBody = id => {
+      const root = model.add(), n = remoteBodies.size;
+      const shirt = [[.75,.3,.9],[.25,.85,.7],[1,.6,.3]][n % 3];
+      const part = (shape, color) => root.add(shape).color(color).dull();
+      const body = {root, head:part('sphere',SKIN), face:part('sphere',[.08,.12,.18]),
+                    torso:part('tubeZ',shirt), hips:part('sphere',PANTS),
+                    arms:{}, legs:{}, nameNode:null, nameText:null};
+      for (const side of ['left','right']) {
+         body.arms[side] = {upper:part('tubeZ',shirt),lower:part('tubeZ',shirt),
+                            elbow:part('sphere',shirt),hand:part('sphere',side==='left'?[1,.4,.4]:[.4,.6,1])};
+         body.legs[side] = {upper:part('tubeZ',PANTS),lower:part('tubeZ',PANTS),
+                            knee:part('sphere',PANTS),foot:part('sphere',PANTS)};
+      }
+      const mesh = 'coachRemoteName_' + n;
+      body.setName = (name, position) => {
+         if (name !== body.nameText) {
+            body.nameText = name;
+            clay.defineTextMesh(mesh,name);
+            if (!body.nameNode) body.nameNode = root.add(mesh).color(shirt).dull();
+         }
+         const width = .019 * Math.max(0,name.length-1) + .015;
+         body.nameNode.identity().move(position[0]-width*.85/2,position[1],position[2]).scale(.85);
+      };
+      remoteBodies.set(id,body);
+      return body;
+   };
+   const updateRemoteBodies = () => {
+      const visible = new Set();
+      for (const id of window.clients || []) {
+         if (String(id) === String(clientID)) continue;
+         const pose = coachAvatarPose(clientState.head(id),
+                                      clientState.hand(id,'left'),clientState.hand(id,'right'));
+         if (!pose) continue;
+         visible.add(String(id));
+         const body = remoteBodies.get(String(id)) || makeRemoteBody(String(id));
+         body.root.identity();
+         body.head.identity().move(pose.head).scale(.105,.12,.105);
+         body.face.identity().move(pose.face).scale(.055,.025,.02);
+         body.torso.placeLimb(pose.chest,pose.hips,.135);
+         body.hips.identity().move(pose.hips).scale(.17,.1,.12);
+         for (const side of ['left','right']) {
+            const arm = body.arms[side], leg = body.legs[side];
+            const wrist = pose.wrists[side], elbow = pose.elbows[side];
+            arm.upper.identity().scale(0);arm.lower.identity().scale(0);
+            arm.elbow.identity().scale(0);arm.hand.identity().scale(0);
+            if (wrist) {
+               arm.upper.placeLimb(pose.shoulders[side],elbow,.045);
+               arm.lower.placeLimb(elbow,wrist,.038);
+               arm.elbow.identity().move(elbow).scale(.045);
+               arm.hand.identity().move(wrist).scale(.055);
+            }
+            leg.upper.placeLimb(pose.hipJoints[side],pose.knees[side],.055);
+            leg.lower.placeLimb(pose.knees[side],pose.feet[side],.047);
+            leg.knee.identity().move(pose.knees[side]).scale(.055);
+            leg.foot.identity().move(pose.feet[side]).scale(.075,.035,.11);
+         }
+         const name = window.clientData?.[id]?.name;
+         const safeName = typeof name==='string' ? name.replace(/[^A-Za-z0-9 ]/g,'').slice(0,16) : '';
+         body.setName(safeName && safeName!=='Guest' ? safeName : 'PARTNER',pose.label);
+      }
+      for (const [id,body] of remoteBodies)
+         if (!visible.has(id)) body.root.identity().scale(0);
+      return visible.size;
+   };
 
    let beams = { left: new ControllerBeam(model, 'left'), right: new ControllerBeam(model, 'right') };
 
@@ -300,6 +420,7 @@ export const init = async model => {
       if (! coach || typeof coach != 'object') coach = { };
       let dt = clamp(model.deltaTime || 1/60, 1/200, 1/20);
       for (let h in beams) beams[h].update();
+      const partnerCount = updateRemoteBodies();
 
       let M = mode(), beat = BEAT[M.mode], clock = Date.now() / 1000;
       let k = Math.floor(clock / (2*beat));                          // which pose
@@ -312,6 +433,7 @@ export const init = async model => {
       let headM = clientState.head(clientID);
       let L = inputEvents.pos('left'), R = inputEvents.pos('right');
       let real = Array.isArray(headM) && isVec(L) && isVec(R);
+      watchingPartner = !real && partnerCount > 0;
       let headP = real ? headM.slice(12,15) : [.0, 1.6, .4];
       standH = real ? Math.max(standH - .01 * dt, headP[1]) : 1.6;   // head height when standing (decays slowly, so it adapts to a new player)
       let size = clamp(standH / 1.65, .6, 1.2);
@@ -332,7 +454,8 @@ export const init = async model => {
          }
       }
       for (let h in ghosts)
-         ghosts[h].identity().move(hands[h]).scale(real ? 0 : .04).color(h == 'left' ? [1,.5,.5] : [.5,.6,1]);
+         ghosts[h].identity().move(hands[h]).scale(real || watchingPartner ? 0 : .04)
+                  .color(h == 'left' ? [1,.5,.5] : [.5,.6,1]);
 
       let squatting = real ? headP[1] < standH - .2 * size : !! target.squat && u > .8 && k % 5 != 4;
 
@@ -402,7 +525,7 @@ export const init = async model => {
          if (d > TOL) ok = false;
       }
       if (target.squat && ! squatting) ok = false;
-      if (rec == -1 && ! myHit) {
+      if (rec == -1 && ! myHit && !watchingPartner) {
          for (let h in acc)                                          // the closer, the denser the pulses
             if (real && acc[h] > .2 && clock > nextPulse[h]) {
                buzz(h, .25 + .4 * acc[h], 20);
@@ -432,7 +555,7 @@ export const init = async model => {
                if (p.ok) good++;
             }
          }
-         if (n == 0 && ! real) {                                     // nobody real: judge the ghost's performance
+         if (n == 0 && ! real && !watchingPartner) {                 // nobody real: judge the ghost's performance
             n = 1;
             good = (k - 1) % 5 != 4 ? 1 : 0;
          }
@@ -519,7 +642,7 @@ export const init = async model => {
 
       for (let h in targets) {
          let c = h == 'left' ? [1,.25,.25] : [.25,.4,1];
-         let show = rec == -1;
+         let show = rec == -1 && !watchingPartner;
          targets[h].identity().move(goal[h]).scale(show ? (myHit ? .05 : .075 - .02 * acc[h]) : 0)
                    .color(myHit ? [.3,2,.5] : cg.scale(c, .6 + 1.2 * acc[h]));
       }
@@ -553,5 +676,6 @@ export const init = async model => {
          for (let i = 0 ; i < icon[m].nChildren() ; i++)
             icon[m].child(i).color(active ? (m == 'fit' ? [2,.7,.2] : [.5,.8,2]) : hot ? [1,1,1] : [.35,.35,.4]);
       }
+      updateText();
    });
 }
