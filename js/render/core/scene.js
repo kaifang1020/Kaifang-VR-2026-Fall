@@ -27,6 +27,20 @@ import { Ray } from "../math/ray.js";
 import { getViews } from "./controllerInput.js";
 // import { corelink_event } from "../../util/corelink_sender.js";
 
+// Two views beside each other: the real camera on the left, a second camera on the
+// right. Each gets half the width, so the projection's horizontal scale is doubled
+// to keep the same aspect ratio (narrower field of view, nothing stretched).
+function splitViews(main, extraViewMatrix) {
+  const vp = main.viewport, half = Math.floor(vp.width / 2);
+  const narrow = m => { const p = new Float32Array(m); p[0] *= 2; return p; };
+  return [
+    new RenderView(narrow(main.projectionMatrix), new Float32Array(main.viewMatrix),
+                   {x: vp.x, y: vp.y, width: half, height: vp.height}, 'left'),
+    new RenderView(narrow(main.projectionMatrix), Float32Array.from(extraViewMatrix),
+                   {x: vp.x + half, y: vp.y, width: vp.width - half, height: vp.height}, 'right'),
+  ];
+}
+
 export class WebXRView extends RenderView {
   constructor(view, layer) {
     super(
@@ -261,6 +275,13 @@ export class Scene extends Node {
     let views = [];
     for (let view of pose.views) {
       views.push(new WebXRView(view, layer));
+    }
+
+    // Desktop split screen: a scene may supply a second camera (a view matrix) and
+    // the single view is replaced by two side-by-side views on the same canvas.
+    if (views.length == 1 && typeof window.splitView === 'function') {
+      const extra = window.splitView(views[0]);
+      if (extra) views = splitViews(views[0], extra);
     }
 
     getViews(views);
