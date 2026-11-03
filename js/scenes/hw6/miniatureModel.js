@@ -5,14 +5,20 @@
  *    stage = T(spot) · R_y(π) · S(k) · T(−origin)
  *
  * Read from right to left: move the player so the floor point under their head is
- * the origin, shrink around that point, turn it to face the player, carry it to the
- * table. The body itself is drawn at full size in ordinary room coordinates; it
- * never knows it is small.
+ * the origin, shrink around that point, optionally turn it to face the player, carry
+ * it to the table. The body itself is drawn at full size in ordinary room
+ * coordinates; it never knows it is small.
+ *
+ * Viewing mode 2 ("be the miniature") is the same matrix inverted and applied to the
+ * world instead: the table and everything on it grow twelve times around the spot,
+ * which lands exactly under the player's feet. The camera never moves; the world does.
  */
 import * as cg from '../../render/core/cg.js';
 
-export const SCALE = .1;                          // 1.7 m tall becomes 17 cm
-export const SPOT = [0, .80, -.6];                // table top, in front of the player
+export const INCH = .0254;
+export const SCALE = 1 / 12;                                   // one inch on the table is one foot to the miniature
+export const TABLE = {width: 60 * INCH, depth: 24 * INCH, height: 30 * INCH, at: [0, 0, -.7]};   // the classroom table
+export const SPOT = [TABLE.at[0], TABLE.height, TABLE.at[2] + 8 * INCH];  // near the table's front edge: where the miniature stands
 export const validMatrix = m => !!m && m.length === 16 && Array.from(m).every(Number.isFinite);
 
 // The point on the floor under the head: the miniature's own origin.
@@ -30,6 +36,13 @@ export function placeMiniature(node, origin, {scale = SCALE, spot = SPOT, faceMe
    node.identity().move(spot[0], spot[1], spot[2]);
    if (faceMe) node.turnY(Math.PI);
    return node.scale(scale, scale, scale).move(-origin[0], -origin[1], -origin[2]);
+}
+
+// Mode 2: the inverse product, applied to the world. T(origin) · S(1/k) · R_y(−π) · T(−spot).
+export function placeWorld(node, origin, {scale = SCALE, spot = SPOT, faceMe = false} = {}) {
+   node.identity().move(origin[0], origin[1], origin[2]).scale(1 / scale, 1 / scale, 1 / scale);
+   if (faceMe) node.turnY(-Math.PI);
+   return node.move(-spot[0], -spot[1], -spot[2]);
 }
 
 // Without a headset nothing is tracked. The desktop camera stands in for the head
@@ -63,4 +76,42 @@ export function tableCamera(angle, {spot = SPOT, scale = SCALE, distance = .38} 
    const eye = [spot[0] + distance * Math.sin(angle), spot[1] + 1.45 * scale, spot[2] + distance * Math.cos(angle)];
    const target = [spot[0], spot[1] + CAMERA_TARGET_HEIGHT * scale, spot[2]];
    return lookAtView(eye, target);
+}
+
+// ---- The house on the table, in table units (metres at 1/12) ----
+export const HOUSE = {
+   width: 10 * INCH, depth: 8 * INCH, wall: 8 * INCH, thick: .3 * INCH,     // a 10 x 8 ft house with 8 ft walls
+   doorWidth: 3 * INCH, doorHeight: 6.5 * INCH,
+   // Built with its door on the local -x wall, then turned a quarter turn so the door faces +z:
+   // toward the miniature and toward me. Turned, the house is `depth` wide along x and `width` along z.
+   turn: Math.PI / 2,
+   at: [SPOT[0], SPOT[1], TABLE.at[2] - 5 * INCH],                            // the door is 8 ft in front of the miniature
+};
+// Keep the house on the table top when it is moved.
+export function clampHouse(at) {
+   const hx = TABLE.width / 2 - HOUSE.depth / 2 - .2 * INCH, hz = TABLE.depth / 2 - HOUSE.width / 2 - .2 * INCH;
+   return [Math.max(TABLE.at[0] - hx, Math.min(TABLE.at[0] + hx, at[0])), TABLE.height,
+           Math.max(TABLE.at[2] - hz, Math.min(TABLE.at[2] + hz, at[2]))];
+}
+// Door centre, in table coordinates, for a house standing at `at`: on the +z wall after the turn.
+export const doorCentre = at => [at[0], at[1], at[2] + HOUSE.width / 2];
+// The door opens when the miniature (the player's point mapped onto the table) is within 3 ft of it.
+export function nearDoor(tablePoint, at, reach = 3 * INCH) {
+   const d = doorCentre(at);
+   return Math.hypot(tablePoint[0] - d[0], tablePoint[2] - d[2]) < reach;
+}
+// Axis-aligned bounds of the house for grabbing: centre and half size.
+export const houseBounds = at => ({centre: [at[0], at[1] + HOUSE.wall / 2, at[2]],
+                                   half: [HOUSE.depth / 2, HOUSE.wall / 2 + 2.5 * INCH, HOUSE.width / 2]});
+
+// Walking in mode 2 with the left stick: a step in the player's own floor directions.
+// Moving the origin backward carries the world backward, which walks me forward.
+export const WALK_SPEED = 4 * 12 * INCH;          // 4 ft/s to the miniature, about a brisk walk
+export function walkOrigin(origin, head, stick, dt, speed = WALK_SPEED) {
+   const f = [-head[8], 0, -head[10]], n = Math.hypot(f[0], f[2]);
+   if (n < 1e-6) return origin;
+   const fw = [f[0] / n, 0, f[2] / n], rt = [-fw[2], 0, fw[0]];
+   const ahead = -stick.y, side = stick.x;                    // hardware: pushing the stick up is negative y
+   return [origin[0] - (fw[0] * ahead + rt[0] * side) * speed * dt, origin[1],
+           origin[2] - (fw[2] * ahead + rt[2] * side) * speed * dt];
 }
