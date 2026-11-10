@@ -14,6 +14,8 @@ export default () => {
             { name: "pocketCity", path: "./hw5/pocketCity.js", public: true },
             // HW7: a 1/12 miniature of me and a house on a table; V switches between seeing it and being it
             { name: "miniature", path: "./hw6/miniature.js", public: true },
+            // HW8: two players, one is the giant at the table and one is the 1/12 mini on it
+            { name: "giantmini", path: "./hw8/giantMini.js", public: true },
             // HW3: a shared instrument built from message-passing operations
             { name: "echoGarden", path: "./hw3/echoGarden.js", public: true },
             // HW1
