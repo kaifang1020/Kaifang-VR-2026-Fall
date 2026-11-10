@@ -117,7 +117,7 @@ export const init = async model => {
                      tilt: .45, size: 1.25});
    };
 
-   let origin = null, faceMe = true, check = false, lift = {left: 0, right: 0};
+   let origin = null, faceMe = false, check = false, lift = {left: 0, right: 0};
    let split = true, camAngle = .6;
    let mode = 'table', houseAt = [...HOUSE.at], doorAngle = 0, doorForced = false, lampOn = false, grab = null;
    let lastSelf = null, lastFrame = Date.now();
